@@ -1,0 +1,17 @@
+
+{
+  "placeholderImages": [
+    {
+      "id": "pos-hero",
+      "description": "A stylish modern clothing store interior",
+      "imageUrl": "https://picsum.photos/seed/pos/800/600",
+      "imageHint": "clothing boutique"
+    },
+    {
+      "id": "success-check",
+      "description": "Success checkmark animation placeholder",
+      "imageUrl": "https://picsum.photos/seed/success/400/400",
+      "imageHint": "success check"
+    }
+  ]
+}
