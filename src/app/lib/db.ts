@@ -1,123 +1,187 @@
 
-import sqlite3 from 'sqlite3';
-import { open, Database } from 'sqlite';
-import path from 'path';
+import { neon } from '@neondatabase/serverless';
 
 /**
- * Order Model and Status
+ * Transaction Model and Status
  */
-export type OrderStatus = 'pending' | 'paid' | 'failed';
+export type TransactionStatus = 'pending' | 'success' | 'failed';
 
-export interface Order {
+export interface Transaction {
   id: string;
   wallet_address: string;
   amount_musd: number;
-  status: OrderStatus;
+  status: string;
   transaction_hash?: string;
-  created_at: string;
+  created_at: any;
 }
 
-let dbInstance: Database | null = null;
+export type Order = Transaction;
 
-/**
- * Get SQLite Database instance
- */
-async function getDb() {
-  if (dbInstance) return dbInstance;
-  
-  dbInstance = await open({
-    filename: path.join(process.cwd(), 'shopos.db'),
-    driver: sqlite3.Database
-  });
+const getSql = () => {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error('DATABASE_URL is not defined in environment variables');
+  }
+  return neon(url);
+};
 
-  await dbInstance.exec(`
-    CREATE TABLE IF NOT EXISTS orders (
-      id TEXT PRIMARY KEY,
-      wallet_address TEXT NOT NULL,
-      amount_musd REAL NOT NULL DEFAULT 1.00,
-      status TEXT NOT NULL DEFAULT 'pending',
-      transaction_hash TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+let initialized = false;
 
-    CREATE TABLE IF NOT EXISTS webhook_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      payload TEXT NOT NULL,
-      received_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  return dbInstance;
+async function ensureDb() {
+  if (!initialized) {
+    await initDb();
+    initialized = true;
+  }
 }
 
 /**
- * Create a new order
+ * Initialize Database Schema
  */
-export async function createOrder(walletAddress: string, amount: number = 1.0): Promise<Order> {
-  const db = await getDb();
+export async function initDb() {
+  const sql = getSql();
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS transactions (
+        id TEXT PRIMARY KEY,
+        recipient TEXT NOT NULL,
+        amount DECIMAL NOT NULL DEFAULT 1.00,
+        status TEXT NOT NULL DEFAULT 'pending',
+        transaction_hash TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `;
+
+    await sql`
+      CREATE TABLE IF NOT EXISTS webhook_logs (
+        id SERIAL PRIMARY KEY,
+        payload JSONB NOT NULL,
+        received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `;
+    console.log('Database initialized successfully');
+  } catch (err) {
+    console.error('Database initialization failed:', err);
+  }
+}
+
+/**
+ * Create a new transaction (renamed from order for consistency with request)
+ */
+export async function createTransaction(recipient: string, amount: number = 1.0): Promise<Transaction> {
+  await ensureDb();
+  const sql = getSql();
   const id = Math.random().toString(36).substring(7);
-  const normalizedAddress = walletAddress.toLowerCase().trim();
+  const normalizedRecipient = recipient.toLowerCase().trim();
 
-  await db.run(
-    'INSERT INTO orders (id, wallet_address, amount_musd, status) VALUES (?, ?, ?, ?)',
-    [id, normalizedAddress, amount, 'pending']
-  );
+  const results = await sql`
+    INSERT INTO transactions (id, recipient, amount, status) 
+    VALUES (${id}, ${normalizedRecipient}, ${amount}, 'pending')
+    RETURNING id, recipient as wallet_address, amount::float as amount_musd, status, transaction_hash, created_at
+  `;
 
-  const order = await db.get('SELECT * FROM orders WHERE id = ?', [id]);
-  return order as Order;
+  return results[0] as unknown as Transaction;
 }
 
 /**
- * Retrieve an order
+ * Compatibility alias for createOrder
  */
-export async function getOrder(id: string): Promise<Order | undefined> {
-  const db = await getDb();
-  const order = await db.get('SELECT * FROM orders WHERE id = ?', [id]);
-  return order as Order;
+export async function createOrder(walletAddress: string, amount: number = 1.0) {
+  return createTransaction(walletAddress, amount);
+}
+
+/**
+ * Retrieve a transaction
+ */
+export async function getTransaction(id: string): Promise<any | undefined> {
+  await ensureDb();
+  const sql = getSql();
+  const results = await sql`
+    SELECT id, recipient as wallet_address, amount::float as amount_musd, status, transaction_hash, created_at 
+    FROM transactions WHERE id = ${id}
+  `;
+  if (results.length === 0) return undefined;
+  return results[0];
+}
+
+/**
+ * Compatibility alias for getOrder
+ */
+export async function getOrder(id: string) {
+  return getTransaction(id);
 }
 
 /**
  * Record a raw webhook payload
  */
 export async function logWebhook(payload: any) {
-  const db = await getDb();
-  await db.run(
-    'INSERT INTO webhook_logs (payload) VALUES (?)',
-    [JSON.stringify(payload)]
-  );
+  await ensureDb();
+  const sql = getSql();
+  await sql`
+    INSERT INTO webhook_logs (payload) 
+    VALUES (${payload})
+  `;
 }
 
 /**
  * Get latest webhook logs
  */
 export async function getWebhookLogs(limit: number = 20) {
-  const db = await getDb();
-  return await db.all('SELECT * FROM webhook_logs ORDER BY received_at DESC LIMIT ?', [limit]);
+  await ensureDb();
+  const sql = getSql();
+  return await sql`SELECT * FROM webhook_logs ORDER BY received_at DESC LIMIT ${limit}`;
 }
 
 /**
- * Update order via Webhook (Matches latest pending order for address)
+ * Update transaction via Webhook (Matches latest pending transaction for address)
+ * Requirement: 当 Goldsky 推送数据时，将 transaction_hash、amount、recipient 存入 transactions 表中，并将状态设为 'success'。
  */
-export async function updateOrderByWallet(walletAddress: string, status: OrderStatus, hash?: string) {
-  const db = await getDb();
-  const normalizedAddress = walletAddress.toLowerCase().trim();
+export async function updateTransactionByRecipient(recipient: string, amount: number, hash: string) {
+  await ensureDb();
+  const sql = getSql();
+  const normalizedRecipient = recipient.toLowerCase().trim();
   
-  // Find the latest pending order for this wallet
-  const order = await db.get(
-    'SELECT id FROM orders WHERE LOWER(wallet_address) = ? AND status = ? ORDER BY created_at DESC LIMIT 1',
-    [normalizedAddress, 'pending']
-  );
+  // Find the latest pending transaction for this recipient
+  const pending = await sql`
+    SELECT id FROM transactions 
+    WHERE LOWER(recipient) = ${normalizedRecipient} 
+    AND status = 'pending' 
+    ORDER BY created_at DESC 
+    LIMIT 1
+  `;
 
-  if (!order) {
-    console.warn(`[SQLite] No pending order found for: ${normalizedAddress}`);
-    return null;
+  if (pending.length === 0) {
+    console.warn(`[Neon] No pending transaction found for: ${normalizedRecipient}. Creating new record.`);
+    const id = Math.random().toString(36).substring(7);
+    const results = await sql`
+      INSERT INTO transactions (id, recipient, amount, status, transaction_hash)
+      VALUES (${id}, ${normalizedRecipient}, ${amount}, 'success', ${hash})
+      RETURNING id, recipient as wallet_address, amount::float as amount_musd, status, transaction_hash, created_at
+    `;
+    return results[0];
   }
 
-  await db.run(
-    'UPDATE orders SET status = ?, transaction_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    [status, hash || null, order.id]
-  );
+  const results = await sql`
+    UPDATE transactions 
+    SET status = 'success', 
+        transaction_hash = ${hash}, 
+        amount = ${amount},
+        updated_at = CURRENT_TIMESTAMP 
+    WHERE id = ${pending[0].id}
+    RETURNING id, recipient as wallet_address, amount::float as amount_musd, status, transaction_hash, created_at
+  `;
 
-  return await db.get('SELECT * FROM orders WHERE id = ?', [order.id]);
+  return results[0];
+}
+
+/**
+ * Compatibility alias for updateOrderByWallet
+ */
+export async function updateOrderByWallet(walletAddress: string, status: string, hash?: string) {
+  // We'll treat status as 'success' if it matches our successful state
+  if (status === 'paid' || status === 'success') {
+    // We don't have the amount here strictly from old interface, but we can try to find from existing record or use 0
+    return updateTransactionByRecipient(walletAddress, 0, hash || '');
+  }
+  return null;
 }

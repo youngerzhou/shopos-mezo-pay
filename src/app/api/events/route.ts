@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
             });
             controller.enqueue(encoder.encode(`data: ${data}\n\n`));
 
-            if (order.status === 'paid' || order.status === 'failed') {
+            if (order.status === 'paid' || order.status === 'success' || order.status === 'failed') {
               clearInterval(interval);
               controller.close();
             }

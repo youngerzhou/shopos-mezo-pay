@@ -43,7 +43,7 @@ export default function ShoposMezo() {
         const data = JSON.parse(event.data);
         setLastHeartbeat(new Date().toLocaleTimeString());
         
-        if (data.status === 'paid') {
+        if (data.status === 'paid' || data.status === 'success') {
           setProgress(100);
           setTimeout(() => setIsPaid(true), 1000);
           eventSource.close();
@@ -168,7 +168,7 @@ export default function ShoposMezo() {
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-1.5">
                     <Database className="w-3 h-3 text-muted-foreground" />
-                    <span className="text-[10px] font-bold text-muted-foreground uppercase">SQLite Storage</span>
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase">Neon Serverless Storage</span>
                   </div>
                   <Badge variant={sseStatus === 'connected' ? 'secondary' : 'destructive'} className="text-[9px] py-0 px-2 h-5">
                     {sseStatus === 'connected' ? <Activity className="w-2.5 h-2.5 mr-1 animate-pulse" /> : null}
