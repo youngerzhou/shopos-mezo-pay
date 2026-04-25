@@ -8,46 +8,68 @@ import { updateTransactionByRecipient, logWebhook } from '@/app/lib/db';
 export async function POST(req: NextRequest) {
   try {
     const payload = await req.json();
-    console.log('--- Webhook Received (Neon Mode) ---');
-    console.log('Full Received Payload:', JSON.stringify(payload, null, 2));
+    console.log('--- [GOLD SKY] WEBHOOK RECEIVED ---');
+    console.log('FULL PAYLOAD:', JSON.stringify(payload, null, 2));
     
-    // Save to DB for debugging
+    // Save raw payload for debugging interface
     await logWebhook(payload);
 
-    // Extract data from Goldsky payload structure
-    let data = payload.data;
-    if (!data) {
-      if (Array.isArray(payload)) {
-        data = payload[0]?.data || payload[0];
-      } else {
-        data = payload;
-      }
+    // Goldsky often sends an array of events or a single object with a data property
+    // Sometimes it is { "data": { ... } }, sometimes it is [{ "data": { ... } }]
+    // We normalize to an array of data objects
+    let events: any[] = [];
+    if (Array.isArray(payload)) {
+      events = payload.map(item => item.data || item);
+    } else if (payload.data) {
+      events = Array.isArray(payload.data) ? payload.data : [payload.data];
+    } else {
+      events = [payload];
     }
     
-    // Extract recipient, amount, and hash based on typical indexer fields
-    // recipient is often 'to', 'recipient', 'wallet'
-    const recipient = (data.recipient || data.to || data.receiver || data.owner || "").toString();
-    const amount = parseFloat(data.amount || data.value || data.size || "1.0");
-    const txHash = (data.transaction_hash || data.hash || data.tx_hash || "0x_unknown").toString();
+    console.log(`Processing ${events.length} events from payload...`);
 
-    console.log('Parsed Event Data:', { recipient, amount, txHash });
+    const results = [];
 
-    if (!recipient || recipient.trim() === "") {
-      console.error('Webhook Error: No recipient address found in payload.');
-      return NextResponse.json({ error: 'No recipient found', received: data }, { status: 400 });
+    for (const data of events) {
+      // Try to extract recipient address from common Goldsky/Indexer fields
+      const recipient = (
+        data.recipient || 
+        data.to || 
+        data.receiver || 
+        data.owner || 
+        data.wallet || 
+        data.address || 
+        ""
+      ).toString().toLowerCase().trim();
+
+      const amount = parseFloat(data.amount || data.value || data.size || "0");
+      const txHash = (data.transaction_hash || data.hash || data.tx_hash || "0x_unknown").toString();
+
+      console.log(`[EVENT] Found Recipient: "${recipient}", Amount: ${amount}, Hash: ${txHash}`);
+
+      if (!recipient) {
+        console.warn('Skipping event: No recipient address found in event data.', data);
+        continue;
+      }
+
+      // Update the transaction in database using case-insensitive match (handled inside the function)
+      const updatedTx = await updateTransactionByRecipient(recipient, amount, txHash);
+      if (updatedTx) {
+        console.log(`[SUCCESS] Transaction ${updatedTx.id} updated to success for ${recipient}`);
+        results.push(updatedTx.id);
+      } else {
+        console.warn(`[MISSING] No matching pending transaction found for recipient: ${recipient}`);
+      }
     }
 
-    // Process the transaction record
-    const updatedTx = await updateTransactionByRecipient(recipient, amount, txHash);
+    return NextResponse.json({ 
+      success: true, 
+      processed: results.length,
+      transactionIds: results 
+    });
 
-    if (updatedTx) {
-      console.log(`Transaction ${updatedTx.id} processed successfully as success`);
-      return NextResponse.json({ success: true, transactionId: updatedTx.id });
-    }
-
-    return NextResponse.json({ error: 'Transaction processing failed', recipient }, { status: 500 });
   } catch (error: any) {
-    console.error('Webhook failed:', error.message);
+    console.error('Webhook processing failed fatal error:', error.message);
     return NextResponse.json({ error: 'Server error', detail: error.message }, { status: 500 });
   }
 }
