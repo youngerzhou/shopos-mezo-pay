@@ -31,40 +31,38 @@ export default function ShoposMezo() {
     if (!order || isPaid) return;
 
     setSseStatus('connecting');
-    const eventSource = new EventSource(`/api/events?orderId=${order.id}`);
-
-    eventSource.onopen = () => {
-      setSseStatus('connected');
-      setProgress(40);
-    };
-
-    eventSource.onmessage = (event) => {
+    
+    // Switch to short polling because Serverless SSE often timeouts
+    const pollInterval = setInterval(async () => {
       try {
-        const data = JSON.parse(event.data);
+        const res = await fetch(`/api/events?orderId=${order.id}`, { cache: 'no-store' });
+        if (!res.ok) {
+          setSseStatus('error');
+          return;
+        }
+        
+        const data = await res.json();
+        setSseStatus('connected');
         setLastHeartbeat(new Date().toLocaleTimeString());
         
         if (data.status === 'paid' || data.status === 'success') {
           setProgress(100);
-          setTimeout(() => setIsPaid(true), 1000);
-          eventSource.close();
+          clearInterval(pollInterval);
+          setTimeout(() => setIsPaid(true), 800);
         } else {
-          // Slowly increase progress to show activity if we are just receiving heartbeats
+          // Slowly increase progress to show activity
           setProgress(prev => {
-            if (prev < 90) return prev + 1;
+            if (prev < 95) return prev + 0.5;
             return prev;
           });
         }
       } catch (err) {
-        console.error('SSE data parse error:', err);
+        console.error('Polling error:', err);
+        setSseStatus('error');
       }
-    };
+    }, 2000); // Poll every 2 seconds
 
-    eventSource.onerror = (e) => {
-      console.error('SSE Connection Error:', e);
-      setSseStatus('error');
-    };
-
-    return () => eventSource.close();
+    return () => clearInterval(pollInterval);
   }, [order, isPaid]);
 
   const handleScanSuccess = async (address: string) => {

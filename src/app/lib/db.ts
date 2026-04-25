@@ -1,35 +1,28 @@
 
-import { neon } from '@neondatabase/serverless';
+import { neon, NeonQueryFunction } from '@neondatabase/serverless';
 
 /**
- * Transaction Model and Status
+ * Global variable to hold the SQL client instance (singleton).
+ * This prevents creating multiple connections in a serverless environment.
  */
-export type TransactionStatus = 'pending' | 'success' | 'failed';
-
-export interface Transaction {
-  id: string;
-  wallet_address: string;
-  amount_musd: number;
-  status: string;
-  transaction_hash?: string;
-  created_at: any;
-}
-
-export type Order = Transaction;
+let cachedSql: NeonQueryFunction<false, false> | null = null;
 
 const getSql = () => {
+  if (cachedSql) return cachedSql;
+
   const url = process.env.DATABASE_URL;
   if (!url) {
     // Check if we are in build environment
     const isBuild = process.env.NODE_ENV === 'production' && !process.env.NEXT_RUNTIME;
     if (isBuild || process.env.CI) {
       console.warn('DATABASE_URL is missing (Build environment). Using mock client.');
-      const mock = ((...args: any[]) => Promise.resolve([])) as any;
-      return mock;
+      return ((...args: any[]) => Promise.resolve([])) as any;
     }
     throw new Error('DATABASE_URL is not defined in environment variables');
   }
-  return neon(url);
+  
+  cachedSql = neon(url);
+  return cachedSql;
 };
 
 let initialized = false;
@@ -165,6 +158,10 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
       VALUES (${id}, ${normalizedRecipient}, ${amount}, 'success', ${hash})
       RETURNING id, recipient as wallet_address, amount::float as amount_musd, status, transaction_hash, created_at
     `;
+    
+    if (results[0]) {
+       console.log('ORDER_UPDATED_SUCCESSFULLY: ' + hash);
+    }
     return results[0];
   }
 
@@ -177,6 +174,10 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
     WHERE id = ${pending[0].id}
     RETURNING id, recipient as wallet_address, amount::float as amount_musd, status, transaction_hash, created_at
   `;
+
+  if (results[0]) {
+    console.log('ORDER_UPDATED_SUCCESSFULLY: ' + hash);
+  }
 
   return results[0];
 }
