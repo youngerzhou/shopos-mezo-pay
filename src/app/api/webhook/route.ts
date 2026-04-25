@@ -58,16 +58,35 @@ export async function POST(req: NextRequest) {
 
     // Process events
     for (const data of events) {
-      const recipient = (
-        data.recipient || data.to || data.receiver || data.owner || data.wallet || data.address || ""
-      ).toString().toLowerCase().trim();
+      // 1. Extract recipient (using the verified 'recipient' field from your payload)
+      const rawRecipient = data.recipient || data.to || data.address || "";
+      const recipient = rawRecipient.toString().toLowerCase().trim();
 
-      const amount = parseFloat(data.amount || data.value || data.size || "0");
-      const txHash = (data.transaction_hash || data.hash || data.tx_hash || "0x_unknown").toString();
+      // 2. Handle amount conversion (e.g., 1000000000000000000 -> 1)
+      let amount = 0;
+      const rawAmount = data.amount || data.value || "0";
+      try {
+        if (typeof rawAmount === 'string' && rawAmount.length > 15) {
+          // Standard conversion for 18 decimals (Wei to Eth/Token)
+          amount = parseFloat(rawAmount) / 1e18;
+        } else {
+          amount = parseFloat(rawAmount);
+        }
+      } catch (e) {
+        console.warn('Amount conversion error:', e);
+      }
+
+      // 3. Extract transaction hash
+      const txHash = (data.transaction_hash || data.hash || "0x_unknown").toString();
+
+      console.log(`[GOLD SKY EVENT] Match Candidate -> Recipient: ${recipient}, Amount: ${amount}, TX: ${txHash}`);
 
       if (recipient) {
+        // This function handles the LOWER() matching internally in db.ts
         const updatedTx = await updateTransactionByRecipient(recipient, amount, txHash);
-        if (updatedTx) results.push(updatedTx.id);
+        if (updatedTx) {
+          results.push(updatedTx.id);
+        }
       }
     }
 
