@@ -17,8 +17,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing walletAddress' }, { status: 400 });
     }
 
-    // 调用 DB 逻辑创建订单
-    const order = await createOrder(walletAddress, amount || 100);
+    // 使用 POS 机的固定收款地址作为 recipient，而不是用户的钱包地址
+    const POS_RECIPIENT = "0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7";
+    
+    // 调用 DB 逻辑创建订单 (POS机地址, 金额, 付款人地址)
+    const order = await createOrder(POS_RECIPIENT, amount || 1, walletAddress);
     
     return NextResponse.json(order);
   } catch (error: any) {

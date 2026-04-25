@@ -58,9 +58,12 @@ export async function POST(req: NextRequest) {
 
     // Process events
     for (const data of events) {
-      // 1. Extract recipient (using the verified 'recipient' field from your payload)
+      // 1. Extract recipient and sender
       const rawRecipient = data.recipient || data.to || data.address || "";
       const recipient = rawRecipient.toString().toLowerCase().trim();
+      
+      const rawSender = data.sender || data.from || "";
+      const sender = rawSender.toString().toLowerCase().trim();
 
       // 2. Handle amount conversion (e.g., 1000000000000000000 -> 1)
       let amount = 0;
@@ -79,11 +82,11 @@ export async function POST(req: NextRequest) {
       // 3. Extract transaction hash
       const txHash = (data.transaction_hash || data.hash || "0x_unknown").toString();
 
-      console.log(`[GOLD SKY EVENT] Match Candidate -> Recipient: ${recipient}, Amount: ${amount}, TX: ${txHash}`);
+      console.log(`[GOLD SKY EVENT] Match Candidate -> Recipient: ${recipient}, Sender: ${sender}, Amount: ${amount}, TX: ${txHash}`);
 
       if (recipient) {
         // This function handles the LOWER() matching internally in db.ts
-        const updatedTx = await updateTransactionByRecipient(recipient, amount, txHash);
+        const updatedTx = await updateTransactionByRecipient(recipient, amount, txHash, sender);
         if (updatedTx) {
           results.push(updatedTx.id);
         }

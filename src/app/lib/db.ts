@@ -43,6 +43,7 @@ export async function initDb() {
     await sql`
       CREATE TABLE IF NOT EXISTS transactions (
         id TEXT PRIMARY KEY,
+        sender TEXT,
         recipient TEXT NOT NULL,
         amount DECIMAL NOT NULL DEFAULT 1.00,
         status TEXT NOT NULL DEFAULT 'pending',
@@ -50,6 +51,14 @@ export async function initDb() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+      
+      -- Ensure sender column exists for existing tables
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='sender') THEN
+          ALTER TABLE transactions ADD COLUMN sender TEXT;
+        END IF;
+      END $$;
     `;
 
     await sql`
@@ -66,27 +75,34 @@ export async function initDb() {
 }
 
 /**
- * Create a new transaction (renamed from order for consistency with request)
+ * Create a new transaction
  */
-export async function createTransaction(recipient: string, amount: number = 1.0): Promise<Transaction> {
+export async function createTransaction(recipient: string, amount: number = 1.0, sender?: string): Promise<any> {
   await ensureDb();
   const sql = getSql();
   const id = Math.random().toString(36).substring(7);
   const normalizedRecipient = recipient.toLowerCase().trim();
+  const normalizedSender = sender ? sender.toLowerCase().trim() : null;
 
   const results = await sql`
-    INSERT INTO transactions (id, recipient, amount, status) 
-    VALUES (${id}, ${normalizedRecipient}, ${amount}, 'pending')
-    RETURNING id, recipient as wallet_address, amount::float as amount_musd, status, transaction_hash, created_at
+    INSERT INTO transactions (id, recipient, sender, amount, status) 
+    VALUES (${id}, ${normalizedRecipient}, ${normalizedSender}, ${amount}, 'pending')
+    RETURNING id, recipient as wallet_address, sender, amount::float as amount_musd, status, transaction_hash, created_at
   `;
 
-  return results[0] as unknown as Transaction;
+  return results[0];
 }
 
 /**
  * Compatibility alias for createOrder
  */
-export async function createOrder(walletAddress: string, amount: number = 1.0) {
+export async function createOrder(walletAddress: string, amount: number = 1.0, senderOrRecipient?: string) {
+  // If only one param is passed, we assume it's the recipient and sender is unknown
+  // But given our new logic: walletAddress should be the recipient, and we might have sender
+  if (senderOrRecipient) {
+    // If three params, 1st is recipient, 2nd amount, 3rd sender
+    return createTransaction(walletAddress, amount, senderOrRecipient);
+  }
   return createTransaction(walletAddress, amount);
 }
 
@@ -133,36 +149,48 @@ export async function getWebhookLogs(limit: number = 20) {
 }
 
 /**
- * Update transaction via Webhook (Matches latest pending transaction for address)
- * Requirement: 当 Goldsky 推送数据时，将 transaction_hash、amount、recipient 存入 transactions 表中，并将状态设为 'success'。
+ * Update transaction via Webhook
  */
-export async function updateTransactionByRecipient(recipient: string, amount: number, hash: string) {
+export async function updateTransactionByRecipient(recipient: string, amount: number, hash: string, sender?: string) {
   await ensureDb();
   const sql = getSql();
   const normalizedRecipient = recipient.toLowerCase().trim();
+  const normalizedSender = sender ? sender.toLowerCase().trim() : null;
   
-  // Find the latest pending transaction for this recipient
-  const pending = await sql`
+  // Precise match: recipient + sender + amount
+  let query = sql`
     SELECT id FROM transactions 
     WHERE LOWER(recipient) = ${normalizedRecipient} 
-    AND status = 'pending' 
-    ORDER BY created_at DESC 
-    LIMIT 1
+    AND amount = ${amount}
+    AND status = 'pending'
   `;
 
-  if (pending.length === 0) {
-    console.warn(`[Neon] No pending transaction found for: ${normalizedRecipient}. Inserting success record.`);
-    const id = Math.random().toString(36).substring(7);
-    const results = await sql`
-      INSERT INTO transactions (id, recipient, amount, status, transaction_hash)
-      VALUES (${id}, ${normalizedRecipient}, ${amount}, 'success', ${hash})
-      RETURNING id, recipient as wallet_address, amount::float as amount_musd, status, transaction_hash, created_at
+  if (normalizedSender) {
+    query = sql`
+      SELECT id FROM transactions 
+      WHERE LOWER(recipient) = ${normalizedRecipient} 
+      AND LOWER(sender) = ${normalizedSender}
+      AND amount = ${amount}
+      AND status = 'pending' 
+      ORDER BY created_at DESC 
+      LIMIT 1
     `;
-    
-    if (results[0]) {
-       console.log('ORDER_UPDATED_SUCCESSFULLY: ' + hash);
-    }
-    return results[0];
+  } else {
+    query = sql`
+      SELECT id FROM transactions 
+      WHERE LOWER(recipient) = ${normalizedRecipient} 
+      AND amount = ${amount}
+      AND status = 'pending' 
+      ORDER BY created_at DESC 
+      LIMIT 1
+    `;
+  }
+
+  const pending = await query;
+
+  if (pending.length === 0) {
+    console.warn(`[Neon] No pending transaction found for: ${normalizedRecipient} (Sender: ${normalizedSender}). Not creating new record as requested.`);
+    return null;
   }
 
   const results = await sql`
@@ -172,7 +200,7 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
         amount = ${amount},
         updated_at = CURRENT_TIMESTAMP 
     WHERE id = ${pending[0].id}
-    RETURNING id, recipient as wallet_address, amount::float as amount_musd, status, transaction_hash, created_at
+    RETURNING id, recipient as wallet_address, sender, amount::float as amount_musd, status, transaction_hash, created_at
   `;
 
   if (results[0]) {
