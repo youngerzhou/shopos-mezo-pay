@@ -2,8 +2,10 @@ import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
   /* config options here */
-  output: "standalone",
-  distDir: ".next",
+  distDir: '.next',
+  experimental: {
+    serverComponentsExternalPackages: ["@neondatabase/serverless"],
+  },
   typescript: {
     ignoreBuildErrors: true,
   },

@@ -20,6 +20,13 @@ export type Order = Transaction;
 const getSql = () => {
   const url = process.env.DATABASE_URL;
   if (!url) {
+    // Check if we are in build environment
+    const isBuild = process.env.NODE_ENV === 'production' && !process.env.NEXT_RUNTIME;
+    if (isBuild || process.env.CI) {
+      console.warn('DATABASE_URL is missing (Build environment). Using mock client.');
+      const mock = ((...args: any[]) => Promise.resolve([])) as any;
+      return mock;
+    }
     throw new Error('DATABASE_URL is not defined in environment variables');
   }
   return neon(url);
@@ -151,7 +158,7 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
   `;
 
   if (pending.length === 0) {
-    console.warn(`[Neon] No pending transaction found for: ${normalizedRecipient}. Creating new record.`);
+    console.warn(`[Neon] No pending transaction found for: ${normalizedRecipient}. Inserting success record.`);
     const id = Math.random().toString(36).substring(7);
     const results = await sql`
       INSERT INTO transactions (id, recipient, amount, status, transaction_hash)
@@ -178,10 +185,5 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
  * Compatibility alias for updateOrderByWallet
  */
 export async function updateOrderByWallet(walletAddress: string, status: string, hash?: string) {
-  // We'll treat status as 'success' if it matches our successful state
-  if (status === 'paid' || status === 'success') {
-    // We don't have the amount here strictly from old interface, but we can try to find from existing record or use 0
-    return updateTransactionByRecipient(walletAddress, 0, hash || '');
-  }
-  return null;
+  return updateTransactionByRecipient(walletAddress, 0, hash || '');
 }

@@ -1,6 +1,6 @@
 {
   "name": "Shopos Mezo",
-  "description": "App imported from Firebase Studio",
+  "description": "Mezo Pay - Real-time crypto payment dashboard using Neon Serverless Postgres and Goldsky Indexer.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }
