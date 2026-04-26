@@ -37,9 +37,7 @@ function ShoposMezoContent() {
   const userRole = searchParams?.get('role') || 'staff'; // admin, manager, staff
   const storeId = searchParams?.get('store_id') || 'STORE_A';
   
-  const [viewMode, setViewMode] = useState<'pos' | 'onboarding' | 'member_card'>('pos');
-  const [registeredMember, setRegisteredMember] = useState<any>(null);
-  
+  const [viewMode, setViewMode] = useState<'pos'>('pos');
   const [isScanning, setIsScanning] = useState(false);
   const [scanStep, setScanStep] = useState<1 | 2>(1);
   const [scannedCustomerId, setScannedCustomerId] = useState<string | null>(null);
@@ -67,41 +65,6 @@ function ShoposMezoContent() {
       }
     } catch (err) {
       console.error('Failed to fetch settings:', err);
-    }
-  };
-
-  // Phase 1: Onboarding check
-  useEffect(() => {
-    if (staffPromoId) {
-      handleOnboarding(staffPromoId);
-    }
-  }, [staffPromoId]);
-
-  const handleOnboarding = async (staffId: string) => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/customers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staffPromoId: staffId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      
-      setRegisteredMember(data);
-      setViewMode('member_card');
-      toast({
-        title: "Welcome to Mezo!",
-        description: "Your digital member card has been generated.",
-      });
-    } catch (err: any) {
-      toast({
-        variant: "destructive",
-        title: "Onboarding Failed",
-        description: err.message,
-      });
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -258,38 +221,6 @@ function ShoposMezoContent() {
 
   if (isPaid) return <SuccessFeedback onDone={resetPOS} />;
 
-  // Member Card View (Customer Side)
-  if (viewMode === 'member_card' && registeredMember) {
-    return (
-      <div className="min-h-screen bg-primary p-6 flex flex-col items-center justify-center text-white">
-        <Toaster />
-        <div className="w-full max-w-sm space-y-8 text-center">
-          <div className="space-y-2">
-            <Badge className="bg-secondary text-primary font-black animate-pulse">MEMBERSHIP ACTIVE</Badge>
-            <h1 className="text-4xl font-black tracking-tighter">Your Mezo Card</h1>
-            <p className="text-white/60 text-sm">Present this QR to the merchant for 5% discount</p>
-          </div>
-
-          <Card className="bg-white p-8 rounded-[2rem] shadow-2xl border-none">
-            <div className="flex flex-col items-center gap-6">
-              <div className="p-4 bg-primary/5 rounded-2xl border-2 border-primary/10">
-                <QRCodeCanvas value={registeredMember.referral_id} size={220} />
-              </div>
-              <div className="space-y-1">
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Digital Identity</p>
-                <p className="text-xl font-black text-primary font-mono">{registeredMember.referral_id}</p>
-              </div>
-            </div>
-          </Card>
-
-          <Button variant="ghost" className="text-white/70 hover:text-white" onClick={() => setViewMode('pos')}>
-            Switch to Merchant Mode
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-background flex flex-col max-w-md mx-auto shadow-2xl border-x border-border/50">
       <Toaster />
@@ -404,7 +335,7 @@ function ShoposMezoContent() {
                        >
                          Skip Membership
                        </Button>
-                       <Link href="/register" className="w-full">
+                       <Link href={`/register${staffPromoId ? `?staff_promo=${staffPromoId}` : ''}`} className="w-full">
                          <Button variant="outline" className="w-full rounded-2xl h-12 text-xs font-bold bg-secondary/5 border-secondary/20 text-secondary">
                             New Member?
                          </Button>

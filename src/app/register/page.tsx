@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { UserPlus, Sparkles, CheckCircle2, Ticket, Smartphone, Mail, ArrowRight, UserCheck } from 'lucide-react';
+import { UserPlus, Sparkles, CheckCircle2, Ticket, Smartphone, Mail, ArrowRight, UserCheck, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -167,57 +167,77 @@ function RegisterContent() {
               key="success"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="flex flex-col items-center gap-8"
+              className="flex flex-col items-center gap-8 w-full"
             >
-              <div className="w-full bg-primary rounded-[3rem] p-10 text-center text-white space-y-8 flex flex-col items-center shadow-2xl overflow-hidden relative">
-                <div className="absolute top-0 right-0 p-8 opacity-10">
-                   <Sparkles className="w-32 h-32" />
-                </div>
-                
-                <div className="space-y-4">
-                  <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto backdrop-blur-xl">
-                    <CheckCircle2 className="w-10 h-10 text-white" />
+              <div className="w-full bg-slate-900 rounded-[3rem] p-0 text-white shadow-2xl overflow-hidden relative border border-white/5 h-[500px] flex flex-col">
+                <div className="bg-primary p-10 h-1/2 flex flex-col items-center justify-center text-center relative overflow-hidden">
+                   <div className="absolute top-0 right-0 p-8 opacity-10">
+                     <Sparkles className="w-32 h-32" />
                   </div>
-                  <div>
-                    <h2 className="text-3xl font-black tracking-tight">Active Member</h2>
-                    <p className="text-white/60 text-xs font-black uppercase tracking-widest">ShopOS Digital Identity</p>
+                  <div className="space-y-3 z-10">
+                    <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto backdrop-blur-xl">
+                      <CheckCircle2 className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-black tracking-tight leading-none mb-1">Active Member</h2>
+                      <p className="text-white/40 text-[10px] font-black uppercase tracking-[0.2em] leading-none">Mezo Network Loyalty</p>
+                    </div>
                   </div>
                 </div>
 
-                <div className="p-8 bg-white rounded-[2.5rem] shadow-xl border-8 border-white/10">
-                  <QRCodeCanvas 
-                    value={newMember?.referral_id || ''} 
-                    size={220}
-                    level="H"
-                  />
+                <div className="flex-1 bg-white flex flex-col items-center justify-center -mt-8 rounded-t-[3rem] p-8 space-y-6">
+                  <div className="p-4 bg-white rounded-3xl shadow-xl border-4 border-slate-50">
+                    <QRCodeCanvas 
+                      value={newMember?.referral_id || ''} 
+                      size={180}
+                      level="H"
+                    />
+                  </div>
+
+                  <div className="text-center space-y-1">
+                    <p className="text-[10px] font-bold text-slate-400 font-black uppercase tracking-widest leading-none">Member Identifier</p>
+                    <p className="text-2xl font-black tracking-tighter text-slate-800">{newMember?.referral_id}</p>
+                  </div>
                 </div>
 
-                <div className="space-y-2">
-                  <p className="text-xs font-bold opacity-60 uppercase tracking-widest">Digital License ID</p>
-                  <p className="text-2xl font-black tracking-tighter">{newMember?.referral_id}</p>
-                </div>
-
-                <div className="pt-4 border-t border-white/10 w-full">
-                  <div className="flex justify-between items-center px-4">
+                <div className="bg-slate-50 border-t p-6 pb-8">
+                   <div className="flex justify-between items-center px-4">
                     <div className="text-left">
-                       <p className="text-[10px] font-bold opacity-50 uppercase">Holder</p>
-                       <p className="font-bold">{newMember?.username}</p>
+                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Card Holder</p>
+                       <p className="font-bold text-slate-800 text-sm">{newMember?.username}</p>
                     </div>
                     <div className="text-right">
-                       <p className="text-[10px] font-bold opacity-50 uppercase">Tier</p>
-                       <p className="font-bold">Ecosystem Explorer</p>
+                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Base Reward</p>
+                       <p className="font-bold text-primary text-sm">5% Off</p>
                     </div>
                   </div>
                 </div>
               </div>
 
               <div className="space-y-4 w-full">
-                <Button variant="outline" className="w-full h-16 rounded-2xl font-bold gap-2 text-primary border-primary/20" onClick={() => window.location.href = '/'}>
-                  Go to POS Home
+                <Button 
+                   className="w-full h-16 rounded-2xl font-black gap-3 bg-black hover:bg-zinc-900 border-none shadow-xl shadow-black/10 overflow-hidden relative group"
+                   onClick={() => {
+                     toast({
+                       title: "Request Sent",
+                       description: "Apple Wallet pass generation started. Check your notifications.",
+                     });
+                   }}
+                >
+                  <div className="w-6 h-6 bg-white/10 rounded-lg flex items-center justify-center">
+                    <Wallet className="w-4 h-4 text-white" />
+                  </div>
+                  Add to Apple Wallet
+                  <div className="absolute right-0 top-0 h-full w-12 bg-white/5 -skew-x-12 translate-x-12 group-hover:translate-x-0 transition-transform duration-500" />
+                </Button>
+
+                <Button variant="outline" className="w-full h-16 rounded-2xl font-black gap-2 text-primary border-primary/20 bg-primary/5 hover:bg-primary/10" onClick={() => window.location.href = '/'}>
+                  Start Shopping
                   <ArrowRight className="w-4 h-4" />
                 </Button>
-                <p className="text-[10px] text-center text-muted-foreground font-medium px-8">
-                  Screenshot this QR code or add it to your Apple/Google Wallet for ease of use at any ShopOS terminal.
+                
+                <p className="text-[10px] text-center text-muted-foreground font-bold px-8 uppercase tracking-widest opacity-50">
+                   Secured by Mezo Infrastructure
                 </p>
               </div>
             </motion.div>
