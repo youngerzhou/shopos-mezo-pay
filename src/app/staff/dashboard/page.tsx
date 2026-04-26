@@ -133,11 +133,11 @@ export default function StaffDashboard() {
                       <div key={c.id} className="flex items-center justify-between p-3 rounded-xl bg-muted/50 border">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center font-bold text-primary">
-                            {c.wallet_address.substring(2, 4).toUpperCase()}
+                            {c.wallet_address ? c.wallet_address.substring(2, 4).toUpperCase() : '??'}
                           </div>
                           <div>
                             <p className="text-xs font-mono font-bold">
-                              {c.wallet_address.substring(0, 8)}...{c.wallet_address.substring(c.wallet_address.length - 8)}
+                              {c.wallet_address ? `${c.wallet_address.substring(0, 8)}...${c.wallet_address.substring(c.wallet_address.length - 8)}` : 'Scanning Wallet...'}
                             </p>
                             <p className="text-[10px] text-muted-foreground">Joined {new Date(c.created_at).toLocaleDateString()}</p>
                           </div>

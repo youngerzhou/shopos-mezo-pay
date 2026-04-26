@@ -36,15 +36,19 @@ function RegisterContent() {
 
   // Persistent Identity Check
   useEffect(() => {
-    const savedId = localStorage.getItem('MEM_ID');
-    const savedName = localStorage.getItem('MEM_NAME');
-    if (savedId && savedName) {
-      setNewMember({ referral_id: savedId, username: savedName });
-      setStep('success');
-      toast({
-        title: "Welcome Back!",
-        description: `Recognized user: ${savedName}`,
-      });
+    try {
+      const savedId = localStorage.getItem('MEM_ID');
+      const savedName = localStorage.getItem('MEM_NAME');
+      if (savedId && savedName) {
+        setNewMember({ referral_id: String(savedId), username: String(savedName) });
+        setStep('success');
+        toast({
+          title: "Welcome Back!",
+          description: `Recognized user: ${savedName}`,
+        });
+      }
+    } catch (err) {
+      console.warn('LocalStorage access failed:', err);
     }
   }, []);
 
@@ -56,27 +60,32 @@ function RegisterContent() {
 
   // Phone Lookup Logic
   useEffect(() => {
+    const contact = formData.contact || '';
     const timer = setTimeout(() => {
-      if (formData.contact.length >= 10) {
-        handleLookup(formData.contact);
+      if (contact.length >= 10) {
+        handleLookup(contact);
       }
     }, 800);
     return () => clearTimeout(timer);
   }, [formData.contact]);
 
   const handleLookup = async (contact: string) => {
-    if (step === 'success') return;
+    if (step === 'success' || !contact) return;
     
     setLookingUp(true);
     try {
-      const res = await fetch(`/api/register?lookup=${encodeURIComponent(contact)}`);
+      const res = await fetch(`/api/register?lookup=${encodeURIComponent(contact.trim())}`);
       const data = await res.json();
       
       if (data && data.referral_id && !data.error) {
-        setFormData(prev => ({ ...prev, username: data.username }));
-        setNewMember(data);
-        localStorage.setItem('MEM_ID', data.referral_id);
-        localStorage.setItem('MEM_NAME', data.username);
+        const referralId = String(data.referral_id);
+        const username = String(data.username || 'Member');
+        
+        setFormData(prev => ({ ...prev, username }));
+        setNewMember({ ...data, referral_id: referralId, username });
+        
+        localStorage.setItem('MEM_ID', referralId);
+        localStorage.setItem('MEM_NAME', username);
         
         toast({
           title: "Member Found!",
@@ -94,10 +103,13 @@ function RegisterContent() {
   };
 
   const fetchStaffInfo = async () => {
+    if (!staffPromoId) return;
     try {
       const res = await fetch(`/api/register?staff_id=${staffPromoId}`);
       const data = await res.json();
-      setStaffName(data.username);
+      if (data && data.username) {
+        setStaffName(String(data.username));
+      }
     } catch (err) {
       console.error(err);
     }
@@ -105,7 +117,8 @@ function RegisterContent() {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.username || !formData.contact) {
+    const { username, contact } = formData;
+    if (!username || !contact) {
       toast({ variant: "destructive", title: "Wait!", description: "Please fill in all fields." });
       return;
     }
@@ -116,21 +129,27 @@ function RegisterContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...formData,
+          username: username.trim(),
+          contact: contact.trim(),
           staff_id: staffPromoId
         })
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setNewMember(data);
-        localStorage.setItem('MEM_ID', data.referral_id);
-        localStorage.setItem('MEM_NAME', data.username);
+      const data = await res.json();
+      if (res.ok && data && data.referral_id) {
+        const referralId = String(data.referral_id);
+        const name = String(data.username || username);
+        
+        setNewMember({ ...data, referral_id: referralId, username: name });
+        localStorage.setItem('MEM_ID', referralId);
+        localStorage.setItem('MEM_NAME', name);
         setStep('success');
         toast({ title: "Welcome to ShopOS!", description: "Your member profile is ready." });
+      } else {
+        throw new Error(data.error || 'Registration failed');
       }
-    } catch (err) {
-      toast({ variant: "destructive", title: "Error", description: "Failed to register. Please try again." });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Error", description: err.message || "Failed to register. Please try again." });
     } finally {
       setLoading(false);
     }
