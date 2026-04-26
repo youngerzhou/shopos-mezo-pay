@@ -175,6 +175,16 @@ function ShoposMezoContent() {
         if (!res.ok) throw new Error(orderData.error || 'Checkout failed');
         
         setOrder(orderData);
+        
+        // Handle Wallet Auto-Lookup Result
+        if (orderData.customer_id && !scannedCustomerId) {
+          setScannedCustomerId(orderData.customer_id);
+          toast({
+            title: "Member Recognized!",
+            description: "Member discount automatically applied via linked wallet.",
+          });
+        }
+
         if (orderData.passport_level) {
           toast({
             title: "Mezo Passport Detected!",
@@ -352,48 +362,71 @@ function ShoposMezoContent() {
               </div>
             </Card>
 
-            <div className="grid grid-cols-1 gap-4">
-              {userRole === 'admin' && (
-                <Link href="/admin/settings">
+              <div className="grid grid-cols-1 gap-4">
+                {userRole === 'admin' && (
+                  <Link href="/admin/settings">
+                    <Button 
+                      size="lg" 
+                      variant="outline"
+                      className="w-full h-16 rounded-2xl text-sm font-bold border-dashed border-2 border-primary/20 hover:border-primary/50 text-primary flex items-center gap-2 mb-2"
+                    >
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>Global Control Panel</span>
+                    </Button>
+                  </Link>
+                )}
+
+                <div className="space-y-4">
                   <Button 
                     size="lg" 
-                    variant="outline"
-                    className="w-full h-16 rounded-2xl text-sm font-bold border-dashed border-2 border-primary/20 hover:border-primary/50 text-primary flex items-center gap-2 mb-2"
+                    variant={scanStep === 1 ? "default" : "outline"}
+                    disabled={scanStep !== 1}
+                    className={`w-full h-24 rounded-3xl text-xl font-bold flex flex-col gap-1 transition-all ${scanStep === 1 ? 'shadow-lg scale-[1.02] border-none bg-primary' : 'opacity-50'}`}
+                    onClick={() => setIsScanning(true)}
                   >
-                    <ShieldCheck className="w-4 h-4" />
-                    <span>Global Control Panel</span>
+                    <div className="flex items-center gap-3">
+                      <UserCheck className="w-8 h-8" />
+                      <span>Step 1: Member Scan</span>
+                    </div>
+                    <p className="text-[10px] uppercase opacity-60">Apply 5% Discount</p>
                   </Button>
-                </Link>
-              )}
 
-              <Button 
-                size="lg" 
-                variant={scanStep === 1 ? "default" : "outline"}
-                disabled={scanStep !== 1}
-                className={`h-24 rounded-3xl text-xl font-bold flex flex-col gap-1 transition-all ${scanStep === 1 ? 'shadow-lg scale-105 border-none bg-primary' : 'opacity-50'}`}
-                onClick={() => setIsScanning(true)}
-              >
-                <div className="flex items-center gap-3">
-                  <UserCheck className="w-8 h-8" />
-                  <span>Step 1: Member Scan</span>
+                  {scanStep === 1 && (
+                    <div className="grid grid-cols-2 gap-3">
+                       <Button 
+                          variant="outline" 
+                          className="rounded-2xl h-12 text-xs font-bold border-dashed text-muted-foreground"
+                          onClick={() => {
+                            setScannedCustomerId(null);
+                            setScanStep(2);
+                            toast({ title: "Guest Checkout", description: "Proceeding without member discount." });
+                          }}
+                       >
+                         Skip Membership
+                       </Button>
+                       <Link href="/register" className="w-full">
+                         <Button variant="outline" className="w-full rounded-2xl h-12 text-xs font-bold bg-secondary/5 border-secondary/20 text-secondary">
+                            New Member?
+                         </Button>
+                       </Link>
+                    </div>
+                  )}
                 </div>
-                <p className="text-[10px] uppercase opacity-60">Unlock 5% Discount</p>
-              </Button>
 
-              <Button 
-                size="lg" 
-                variant={scanStep === 2 ? "default" : "outline"}
-                disabled={scanStep !== 2}
-                className={`h-24 rounded-3xl text-xl font-bold flex flex-col gap-1 transition-all ${scanStep === 2 ? 'shadow-lg scale-105 border-none bg-secondary text-primary' : 'opacity-50'}`}
-                onClick={() => setIsScanning(true)}
-              >
-                <div className="flex items-center gap-3">
-                  <Wallet className="w-8 h-8" />
-                  <span>Step 2: Wallet Scan</span>
-                </div>
-                <p className="text-[10px] uppercase opacity-60">Complete Transaction</p>
-              </Button>
-            </div>
+                <Button 
+                  size="lg" 
+                  variant={scanStep === 2 ? "default" : "outline"}
+                  disabled={scanStep !== 2}
+                  className={`h-24 rounded-3xl text-xl font-bold flex flex-col gap-1 transition-all ${scanStep === 2 ? 'shadow-lg scale-[1.02] border-none bg-secondary text-primary' : 'opacity-50'}`}
+                  onClick={() => setIsScanning(true)}
+                >
+                  <div className="flex items-center gap-3">
+                    <Wallet className="w-8 h-8" />
+                    <span>Step 2: Wallet Scan</span>
+                  </div>
+                  <p className="text-[10px] uppercase opacity-60">Finalize Payment</p>
+                </Button>
+              </div>
 
             {scannedCustomerId && (
               <div className="p-4 bg-secondary/10 rounded-2xl border border-secondary/20 flex items-center justify-between">
@@ -411,7 +444,11 @@ function ShoposMezoContent() {
                <CardHeader className="pb-2 bg-muted/20 border-b">
                 <div className="flex justify-between items-center">
                   <span className="text-[10px] font-bold text-muted-foreground uppercase">Waiting for Payment</span>
-                  <Badge className="text-[9px] bg-secondary text-primary">ID: {scannedCustomerId}</Badge>
+                  {scannedCustomerId ? (
+                    <Badge className="text-[9px] bg-secondary text-primary">ID: {scannedCustomerId}</Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[9px] opacity-50 uppercase font-bold">Guest Checkout</Badge>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="space-y-6 pt-8">

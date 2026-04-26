@@ -11,31 +11,39 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { customerId, walletAddress, amount } = body;
 
-    if (!customerId) {
-       return NextResponse.json({ error: 'Step 1 Missing: Scan Member Card' }, { status: 400 });
-    }
-
     // Load dynamic settings
     const globalDiscountRate = parseFloat(await getSetting('Global_Discount_Rate', '0.05'));
     const commissionRate = parseFloat(await getSetting('Referral_Commission_Rate', '0.05'));
     const passportMultiplier = parseFloat(await getSetting('Mezo_Passport_Bonus_Multiplier', '1.0'));
 
-    // 1. Verify Customer Identity (Retail CRM)
-    const customer = await getCustomerByReferralId(customerId);
-    if (!customer) {
-      return NextResponse.json({ error: 'Invalid Member Card' }, { status: 404 });
+    let effectiveCustomerId = customerId;
+
+    // WALLET AUTO-LOOKUP: If no member card scanned, check if wallet belongs to a member
+    if (!effectiveCustomerId && walletAddress) {
+      const { getSql, ensureDb } = await import('@/app/lib/db');
+      await ensureDb();
+      const sql = getSql();
+      const existingCustomer = await sql`SELECT referral_id FROM customers WHERE wallet_address = ${walletAddress}`;
+      if (existingCustomer.length > 0) {
+        effectiveCustomerId = existingCustomer[0].referral_id;
+        console.log(`[Auto-Lookup] SUCCESS: ${walletAddress} matched to ${effectiveCustomerId}`);
+      }
     }
 
+    // 1. Verify Customer Identity (Retail CRM)
+    const customer = effectiveCustomerId ? await getCustomerByReferralId(effectiveCustomerId) : null;
+    
     // 2. Lock attribution and initial discount
-    let finalDiscountRate = globalDiscountRate;
+    // Guest = 0, Member = Global Discount
+    let finalDiscountRate = customer ? globalDiscountRate : 0;
     let passportLevel = 0;
     
     // 3. Handle Payment Phase (Step 2)
     if (walletAddress) {
-      // Auto-Bind: Permanent link if currently null
-      if (!customer.wallet_address) {
-        console.log(`[Auto-Bind] Linking wallet ${walletAddress} to member ${customerId}`);
-        await bindWalletToCustomer(customerId, walletAddress);
+      // Auto-Bind: Permanent link if currently null and we have a confirmed customer
+      if (customer && !customer.wallet_address) {
+        console.log(`[Auto-Bind] Linking wallet ${walletAddress} to member ${effectiveCustomerId}`);
+        await bindWalletToCustomer(effectiveCustomerId, walletAddress);
       }
       
       // Passport analysis
@@ -46,10 +54,10 @@ export async function POST(req: NextRequest) {
 
     const baseAmount = amount || 1;
     const finalPrice = baseAmount * (1 - finalDiscountRate);
-    const commissionAmount = baseAmount * commissionRate; 
+    const commissionAmount = customer ? (baseAmount * commissionRate) : 0; 
 
     // POS Machine fixed recipient
-    const POS_RECIPIENT = "0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7";
+    const POS_RECIPIENT = await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7');
     
     // Create order
     const order = await createOrder(
@@ -59,15 +67,15 @@ export async function POST(req: NextRequest) {
       baseAmount, 
       finalDiscountRate, 
       passportLevel,
-      customer.referred_by_staff_id,
+      customer?.referred_by_staff_id || null,
       commissionAmount
     );
     
     return NextResponse.json({
       ...order,
-      customer_id: customerId,
+      customer_id: effectiveCustomerId,
       passport_level: passportLevel,
-      referral_applied: true
+      referral_applied: !!customer
     });
   } catch (error: any) {
     console.error('API POST /api/orders Error:', error);

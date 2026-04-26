@@ -32,6 +32,8 @@ export const SCHEMA_DEFINITION = {
   customers: {
     id: "TEXT PRIMARY KEY",
     wallet_address: "TEXT", // Removed UNIQUE NOT NULL to allow initial onboarding without wallet
+    username: "TEXT", // Added for personalization
+    contact_info: "TEXT", // Phone or Email
     referral_id: "TEXT UNIQUE NOT NULL", // Unique string for referrals
     referred_by_staff_id: "TEXT", // Added to track staff referrals
     level: "INTEGER DEFAULT 1",
@@ -42,8 +44,11 @@ export const SCHEMA_DEFINITION = {
     username: "TEXT UNIQUE NOT NULL",
     password_hash: "TEXT NOT NULL",
     staff_id: "TEXT UNIQUE NOT NULL", // Professional ID for QR linking
+    role: "TEXT DEFAULT 'staff'", // admin, manager, staff
+    store_id: "TEXT DEFAULT 'STORE_A'",
     total_referrals: "INTEGER DEFAULT 0",
-    created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+    created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    updated_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
   },
   pending_registrations: {
     id: "TEXT PRIMARY KEY",
