@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { UserPlus, Sparkles, CheckCircle2, Ticket, Smartphone, Mail, ArrowRight, UserCheck, Wallet } from 'lucide-react';
+import { UserPlus, Sparkles, CheckCircle2, Ticket, Smartphone, Mail, ArrowRight, UserCheck, Wallet, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -26,6 +26,7 @@ function RegisterContent() {
 
   const [step, setStep] = useState<'form' | 'success'>('form');
   const [loading, setLoading] = useState(false);
+  const [lookingUp, setLookingUp] = useState(false);
   const [staffName, setStaffName] = useState<string>('');
   const [formData, setFormData] = useState({
     username: '',
@@ -33,11 +34,64 @@ function RegisterContent() {
   });
   const [newMember, setNewMember] = useState<any>(null);
 
+  // Persistent Identity Check
+  useEffect(() => {
+    const savedId = localStorage.getItem('MEM_ID');
+    const savedName = localStorage.getItem('MEM_NAME');
+    if (savedId && savedName) {
+      setNewMember({ referral_id: savedId, username: savedName });
+      setStep('success');
+      toast({
+        title: "Welcome Back!",
+        description: `Recognized user: ${savedName}`,
+      });
+    }
+  }, []);
+
   useEffect(() => {
     if (staffPromoId) {
       fetchStaffInfo();
     }
   }, [staffPromoId]);
+
+  // Phone Lookup Logic
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (formData.contact.length >= 10) {
+        handleLookup(formData.contact);
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [formData.contact]);
+
+  const handleLookup = async (contact: string) => {
+    if (step === 'success') return;
+    
+    setLookingUp(true);
+    try {
+      const res = await fetch(`/api/register?lookup=${encodeURIComponent(contact)}`);
+      const data = await res.json();
+      
+      if (data && data.referral_id && !data.error) {
+        setFormData(prev => ({ ...prev, username: data.username }));
+        setNewMember(data);
+        localStorage.setItem('MEM_ID', data.referral_id);
+        localStorage.setItem('MEM_NAME', data.username);
+        
+        toast({
+          title: "Member Found!",
+          description: "Welcome back to the ecosystem.",
+        });
+        
+        // Auto-transition to card view
+        setTimeout(() => setStep('success'), 1200);
+      }
+    } catch (err) {
+      console.error('Lookup failed:', err);
+    } finally {
+      setLookingUp(false);
+    }
+  };
 
   const fetchStaffInfo = async () => {
     try {
@@ -70,6 +124,8 @@ function RegisterContent() {
       if (res.ok) {
         const data = await res.json();
         setNewMember(data);
+        localStorage.setItem('MEM_ID', data.referral_id);
+        localStorage.setItem('MEM_NAME', data.username);
         setStep('success');
         toast({ title: "Welcome to ShopOS!", description: "Your member profile is ready." });
       }
@@ -141,10 +197,16 @@ function RegisterContent() {
                       )}
                       <Input 
                         placeholder="e.g. +1 234 567 890" 
-                        className="h-14 rounded-2xl pl-12 border-slate-200 focus:ring-primary/20"
+                        className={`h-14 rounded-2xl pl-12 border-slate-200 focus:ring-primary/20 ${lookingUp ? 'opacity-50' : ''}`}
                         value={formData.contact}
                         onChange={(e) => setFormData({...formData, contact: e.target.value})}
+                        disabled={lookingUp}
                       />
+                      {lookingUp && (
+                        <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                          <RefreshCw className="w-4 h-4 animate-spin text-primary" />
+                        </div>
+                      )}
                     </div>
                   </div>
 

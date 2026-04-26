@@ -35,13 +35,19 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const staff_id = searchParams.get('staff_id');
-
-    if (!staff_id) return NextResponse.json({ error: 'Missing staff_id' }, { status: 400 });
+    const lookup = searchParams.get('lookup');
 
     await ensureDb();
     const sql = getSql();
-    const staff = await sql`SELECT username FROM staff WHERE staff_id = ${staff_id}`;
 
+    if (lookup) {
+      const customer = await sql`SELECT * FROM customers WHERE contact_info = ${lookup} LIMIT 1`;
+      return NextResponse.json(customer[0] || { error: 'Not found' });
+    }
+
+    if (!staff_id) return NextResponse.json({ error: 'Missing staff_id' }, { status: 400 });
+
+    const staff = await sql`SELECT username FROM staff WHERE staff_id = ${staff_id}`;
     return NextResponse.json(staff[0] || { username: 'Our Team' });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
