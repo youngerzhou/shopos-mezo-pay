@@ -28,8 +28,8 @@ export async function POST(req: NextRequest) {
     // 使用 POS 机的固定收款地址作为 recipient，而不是用户的钱包地址
     const POS_RECIPIENT = "0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7";
     
-    // 调用 DB 逻辑创建订单 (POS机地址, 金额, 付款人地址, 原始金额, 折扣率)
-    const order = await createOrder(POS_RECIPIENT, finalPrice, walletAddress, originalPrice, discountRate);
+    // 调用 DB 逻辑创建订单 (POS机地址, 金额, 付款人地址, 原始金额, 折扣率, Passport等级)
+    const order = await createOrder(POS_RECIPIENT, finalPrice, walletAddress, originalPrice, discountRate, level);
     
     return NextResponse.json({
       ...order,

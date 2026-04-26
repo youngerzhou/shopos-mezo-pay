@@ -1,5 +1,6 @@
 
 import { neon, NeonQueryFunction } from '@neondatabase/serverless';
+import { SCHEMA_DEFINITION } from './schema-definition';
 
 /**
  * Transaction Model and Status
@@ -55,54 +56,46 @@ async function ensureDb() {
 }
 
 /**
- * Initialize Database Schema
+ * Initialize Database Schema with automatic Sync
+ * Uses SCHEMA_DEFINITION as the source of truth.
  */
 export async function initDb() {
   const sql = getSql();
+  console.log('Starting dynamic database schema sync...');
+  
   try {
-    await sql`
-      CREATE TABLE IF NOT EXISTS transactions (
-        id TEXT PRIMARY KEY,
-        sender TEXT,
-        recipient TEXT NOT NULL,
-        amount DECIMAL NOT NULL DEFAULT 1.00,
-        original_amount DECIMAL,
-        discount_rate DECIMAL DEFAULT 0,
-        final_amount DECIMAL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        transaction_hash TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
+    for (const [tableName, columns] of Object.entries(SCHEMA_DEFINITION)) {
+      // 1. Create table if not exists with at least the first column
+      const colNames = Object.keys(columns);
+      const firstCol = colNames[0];
+      const firstColDef = columns[firstCol as keyof typeof columns];
       
-      -- Ensure new columns exist for existing tables
-      DO $$
-      BEGIN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='sender') THEN
-          ALTER TABLE transactions ADD COLUMN sender TEXT;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='original_amount') THEN
-          ALTER TABLE transactions ADD COLUMN original_amount DECIMAL;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='discount_rate') THEN
-          ALTER TABLE transactions ADD COLUMN discount_rate DECIMAL DEFAULT 0;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='final_amount') THEN
-          ALTER TABLE transactions ADD COLUMN final_amount DECIMAL;
-        END IF;
-      END $$;
-    `;
-
-    await sql`
-      CREATE TABLE IF NOT EXISTS webhook_logs (
-        id SERIAL PRIMARY KEY,
-        payload JSONB NOT NULL,
-        received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `;
-    console.log('Database initialized successfully');
+      // Basic creation if not exists
+      await sql(`CREATE TABLE IF NOT EXISTS ${tableName} (${firstCol} ${firstColDef})`);
+      
+      // 2. Check each column and ALTER if missing
+      for (const [colName, colDef] of Object.entries(columns)) {
+        // Skip the first column as it's handled by CREATE TABLE
+        if (colName === firstCol) continue;
+        
+        const columnExists = await sql`
+          SELECT 1 
+          FROM information_schema.columns 
+          WHERE table_name = ${tableName} 
+          AND column_name = ${colName}
+        `;
+        
+        if (columnExists.length === 0) {
+          console.log(`[Schema Sync] Adding missing column: ${colName} to ${tableName}`);
+          // Use raw query for DDL
+          await sql(`ALTER TABLE ${tableName} ADD COLUMN ${colName} ${colDef}`);
+        }
+      }
+    }
+    
+    console.log('Database schema synchronized successfully based on definition');
   } catch (err) {
-    console.error('Database initialization failed:', err);
+    console.error('Database schema synchronization failed:', err);
   }
 }
 
@@ -114,7 +107,8 @@ export async function createTransaction(
   amount: number = 1.0, 
   sender?: string,
   originalAmount?: number,
-  discountRate?: number
+  discountRate?: number,
+  passportLevel?: number
 ): Promise<any> {
   await ensureDb();
   const sql = getSql();
@@ -127,9 +121,20 @@ export async function createTransaction(
   const discRate = discountRate || 0;
 
   const results = await sql`
-    INSERT INTO transactions (id, recipient, sender, amount, original_amount, discount_rate, final_amount, status) 
-    VALUES (${id}, ${normalizedRecipient}, ${normalizedSender}, ${finalAmount}, ${origAmount}, ${discRate}, ${finalAmount}, 'pending')
-    RETURNING id, recipient as wallet_address, sender, amount::float as amount_musd, original_amount::float, discount_rate::float, final_amount::float, status, transaction_hash, created_at
+    INSERT INTO transactions (id, recipient, sender, amount, original_amount, discount_rate, final_amount, passport_level, status) 
+    VALUES (${id}, ${normalizedRecipient}, ${normalizedSender}, ${finalAmount}, ${origAmount}, ${discRate}, ${finalAmount}, ${passportLevel}, 'pending')
+    RETURNING 
+      id, 
+      recipient as wallet_address, 
+      sender, 
+      amount::float as amount_musd, 
+      original_amount::float, 
+      discount_rate::float, 
+      final_amount::float, 
+      passport_level,
+      status, 
+      transaction_hash, 
+      created_at
   `;
 
   return results[0];
@@ -138,9 +143,16 @@ export async function createTransaction(
 /**
  * Compatibility alias for createOrder
  */
-export async function createOrder(walletAddress: string, amount: number = 1.0, senderOrRecipient?: string, originalAmount?: number, discountRate?: number) {
+export async function createOrder(
+  walletAddress: string, 
+  amount: number = 1.0, 
+  senderOrRecipient?: string, 
+  originalAmount?: number, 
+  discountRate?: number,
+  passportLevel?: number
+) {
   // walletAddress is recipient in this POS context
-  return createTransaction(walletAddress, amount, senderOrRecipient, originalAmount, discountRate);
+  return createTransaction(walletAddress, amount, senderOrRecipient, originalAmount, discountRate, passportLevel);
 }
 
 /**
@@ -158,6 +170,7 @@ export async function getTransaction(id: string): Promise<any | undefined> {
       original_amount::float,
       discount_rate::float,
       final_amount::float,
+      passport_level,
       status, 
       transaction_hash, 
       created_at 
@@ -255,6 +268,7 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
       original_amount::float,
       discount_rate::float,
       final_amount::float,
+      passport_level,
       status, 
       transaction_hash, 
       created_at
