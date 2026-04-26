@@ -403,7 +403,7 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
           console.log(`[Auto-Bind] Binding wallet ${tx.sender} to staff ${pending.staff_id}`);
           // Create new customer and link to referral ID
           const newCustomerReferralId = 'ref_' + Math.random().toString(36).substring(7);
-          await createCustomer(tx.sender, newCustomerReferralId, tx.passport_level || 1, pending.staff_id);
+          await createCustomer(newCustomerReferralId, tx.passport_level || 1, pending.staff_id, tx.sender);
           // Increment staff referral count
           await incrementStaffReferral(pending.staff_id);
         }

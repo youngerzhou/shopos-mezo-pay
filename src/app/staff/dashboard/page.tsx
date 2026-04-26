@@ -17,7 +17,7 @@ export default function StaffDashboard() {
   const fetchStats = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/staff/stats?staffId=${staffId}`);
+      const res = await fetch(`/api/stats?role=staff&staffId=${staffId}`);
       const data = await res.json();
       setStats(data);
     } catch (err) {

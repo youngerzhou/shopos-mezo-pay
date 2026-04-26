@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ShoppingBag, Scan, History, RefreshCw, Activity, Database, CheckCircle2, Ticket, ArrowRight, Wallet, Percent, UserCheck, CreditCard, Sparkles, UserPlus } from 'lucide-react';
+import { ShoppingBag, Scan, History, RefreshCw, Activity, Database, CheckCircle2, Ticket, ArrowRight, Wallet, Percent, UserCheck, CreditCard, Sparkles, UserPlus, TrendingUp, Layers, QrCode } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Scanner } from '@/components/Scanner';
@@ -15,6 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Toaster } from '@/components/ui/toaster';
 import { WebhookDebugger } from '@/components/WebhookDebugger';
 import { QRCodeCanvas } from 'qrcode.react';
+import Link from 'next/link';
 
 export default function ShoposMezo() {
   return (
@@ -32,6 +33,8 @@ function ShoposMezoContent() {
   const { toast } = useToast();
   const searchParams = useSearchParams();
   const staffPromoId = searchParams?.get('staff_promo');
+  const userRole = searchParams?.get('role') || 'staff'; // admin, manager, staff
+  const storeId = searchParams?.get('store_id') || 'STORE_A';
   
   const [viewMode, setViewMode] = useState<'pos' | 'onboarding' | 'member_card'>('pos');
   const [registeredMember, setRegisteredMember] = useState<any>(null);
@@ -220,18 +223,43 @@ function ShoposMezoContent() {
   return (
     <div className="min-h-screen bg-background flex flex-col max-w-md mx-auto shadow-2xl border-x border-border/50">
       <Toaster />
-      <header className="p-6 pt-10 flex justify-between items-center">
+      <header className="p-6 border-b flex justify-between items-start sticky top-0 bg-background/80 backdrop-blur-md z-50">
         <div>
           <h1 className="text-2xl font-bold text-primary tracking-tight">Shopos Mezo</h1>
           <div className="flex items-center gap-2 mt-1">
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Dual-Scan Terminal</p>
+            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-none">
+              {userRole === 'admin' ? 'Admin Controller' : userRole === 'manager' ? 'Store Manager' : 'Staff Terminal'}
+            </p>
             <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
             <WebhookDebugger />
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="rounded-full bg-white shadow-sm border" onClick={resetPOS}>
-          <RefreshCw className="w-4 h-4" />
-        </Button>
+        <div className="flex items-center gap-2">
+          {userRole === 'admin' && (
+            <Link href="/admin/dashboard">
+              <Button size="icon" variant="outline" className="rounded-full shadow-sm">
+                <TrendingUp className="w-4 h-4 text-primary" />
+              </Button>
+            </Link>
+          )}
+          {userRole === 'manager' && (
+            <Link href={`/manager/dashboard?storeId=${storeId}`}>
+              <Button size="icon" variant="outline" className="rounded-full shadow-sm">
+                <Layers className="w-4 h-4 text-secondary" />
+              </Button>
+            </Link>
+          )}
+          {userRole === 'staff' && (
+             <Link href="/staff/dashboard">
+              <Button size="icon" variant="outline" className="rounded-full shadow-sm">
+                <QrCode className="w-4 h-4 text-primary" />
+              </Button>
+            </Link>
+          )}
+          <Button variant="ghost" size="icon" className="rounded-full bg-white shadow-sm border" onClick={resetPOS}>
+            <RefreshCw className="w-4 h-4" />
+          </Button>
+        </div>
       </header>
 
       <main className="flex-1 px-6 pb-24">
@@ -258,6 +286,17 @@ function ShoposMezoContent() {
             </Card>
 
             <div className="grid grid-cols-1 gap-4">
+              {userRole === 'admin' && (
+                <Button 
+                  size="lg" 
+                  variant="outline"
+                  className="h-16 rounded-2xl text-sm font-bold border-dashed border-2 border-primary/20 hover:border-primary/50 text-primary flex items-center gap-2 mb-2"
+                >
+                  <Database className="w-4 h-4" />
+                  <span>Manage Treasury Vault</span>
+                </Button>
+              )}
+
               <Button 
                 size="lg" 
                 variant={scanStep === 1 ? "default" : "outline"}
