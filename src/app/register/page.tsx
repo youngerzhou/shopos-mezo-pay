@@ -15,12 +15,13 @@ import {
   useWriteContract, 
   useWaitForTransactionReceipt, 
   useAccount,
-  useConnect,
-  useSwitchChain
+  useSwitchChain,
+  useChainId
 } from 'wagmi';
+import { ConnectKitButton, useModal } from 'connectkit';
 import { parseUnits, maxUint256 } from 'viem';
 import { mezoTestnet } from '@/components/Web3Provider';
-import { Zap, ShieldCheck } from 'lucide-react';
+import { Zap, ShieldCheck, Info } from 'lucide-react';
 
 const MUSD_ADDRESS = '0x5Ab8E1C2A31a54728590c7E86749A50a6E1e450b';
 const SHOPOS_PULL_PAYMENT_CONTRACT = '0x489622dCC88cc10787A9A9A9A9A9A9A9A9A9A9A9';
@@ -37,6 +38,7 @@ function RegisterContent() {
   const searchParams = useSearchParams();
   const staffPromoId = searchParams?.get('staff_promo');
   const { toast } = useToast();
+  const { setOpen } = useModal();
 
   const [step, setStep] = useState<'form' | 'success'>('form');
   const [loading, setLoading] = useState(false);
@@ -51,14 +53,13 @@ function RegisterContent() {
   const [selectedAllowance, setSelectedAllowance] = useState(100);
 
   const { address, isConnected } = useAccount();
-  const { connect, connectors } = useConnect();
   const { switchChain } = useSwitchChain();
+  const chainId = useChainId();
   
   const { 
     writeContract, 
     data: approveHash, 
     isPending: isApproving, 
-    error: approveError 
   } = useWriteContract();
 
   const { 
@@ -70,15 +71,22 @@ function RegisterContent() {
 
   const handleEnableFastPay = async (amount: number) => {
     if (!isConnected) {
-      const injected = connectors.find(c => c.id === 'injected');
-      if (injected) connect({ connector: injected });
+      setOpen(true);
       return;
     }
 
-    try {
-      await switchChain({ chainId: mezoTestnet.id });
+    if (chainId !== mezoTestnet.id) {
+       switchChain({ chainId: mezoTestnet.id });
+       return;
+    }
 
+    try {
       const amountUnits = amount === -1 ? maxUint256 : parseUnits(amount.toString(), 18);
+
+      toast({
+        title: "Opening Wallet...",
+        description: "Please confirm the allowance approval in your wallet app.",
+      });
 
       writeContract({
         address: MUSD_ADDRESS as `0x${string}`,
@@ -394,22 +402,33 @@ function RegisterContent() {
                 </div>
               </div>
 
-              <div className="space-y-4 w-full">
-                <Button 
-                   className="w-full h-16 rounded-2xl font-black gap-3 bg-black hover:bg-zinc-900 border-none shadow-xl shadow-black/10 overflow-hidden relative group"
-                   onClick={() => {
-                     toast({
-                       title: "Request Sent",
-                       description: "Apple Wallet pass generation started. Check your notifications.",
-                     });
-                   }}
-                >
-                  <div className="w-6 h-6 bg-white/10 rounded-lg flex items-center justify-center">
-                    <Wallet className="w-4 h-4 text-white" />
+                <div className="space-y-4 w-full">
+                  {!isConnected && (
+                    <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 flex gap-3 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                      <Info className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-xs font-black text-amber-900 uppercase leading-none mb-1">No Wallet Detected</p>
+                        <p className="text-[10px] font-medium text-amber-800 opacity-80">
+                          Open this page inside your Crypto Wallet's browser (e.g. MetaMask, Uniswap) to unlock the 10% bonus discount.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-center">
+                    <ConnectKitButton.Custom>
+                      {({ isConnected, show, truncatedAddress, ensName }) => (
+                        <Button 
+                          onClick={show}
+                          variant="outline"
+                          className="w-full h-12 rounded-xl border-dashed border-primary/30 text-primary font-bold text-xs"
+                        >
+                          {isConnected ? (ensName ?? truncatedAddress) : "Connect Wallet (Mobile Link)"}
+                        </Button>
+                      )}
+                    </ConnectKitButton.Custom>
                   </div>
-                  Add to Apple Wallet
-                  <div className="absolute right-0 top-0 h-full w-12 bg-white/5 -skew-x-12 translate-x-12 group-hover:translate-x-0 transition-transform duration-500" />
-                </Button>
+                </div>
 
                 <div className="space-y-3 w-full bg-slate-50 p-6 rounded-[2rem] border border-slate-200">
                   <div className="flex justify-between items-center mb-2">
@@ -455,6 +474,22 @@ function RegisterContent() {
                     {fastPayActive ? 'Fast Pay Enabled' : (isApproving || isConfirmingApprove ? 'Authorizing...' : `Authorize ${selectedAllowance === 1000 ? '$1000+' : `$${selectedAllowance}`} Allowance`)}
                   </Button>
                 </div>
+
+                <Button 
+                   className="w-full h-16 rounded-2xl font-black gap-3 bg-black hover:bg-zinc-900 border-none shadow-xl shadow-black/10 overflow-hidden relative group"
+                   onClick={() => {
+                     toast({
+                       title: "Request Sent",
+                       description: "Apple Wallet pass generation started. Check your notifications.",
+                     });
+                   }}
+                >
+                  <div className="w-6 h-6 bg-white/10 rounded-lg flex items-center justify-center">
+                    <Wallet className="w-4 h-4 text-white" />
+                  </div>
+                  Add to Apple Wallet
+                  <div className="absolute right-0 top-0 h-full w-12 bg-white/5 -skew-x-12 translate-x-12 group-hover:translate-x-0 transition-transform duration-500" />
+                </Button>
 
                 <Button variant="outline" className="w-full h-16 rounded-2xl font-black gap-2 text-primary border-primary/20 bg-primary/5 hover:bg-primary/10" onClick={() => window.location.href = '/'}>
                   Start Shopping

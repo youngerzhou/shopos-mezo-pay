@@ -1,8 +1,8 @@
 'use client';
 
-import React, { ReactNode } from 'react';
-import { createConfig, http, WagmiProvider } from 'wagmi';
+import { WagmiProvider, createConfig, http } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ConnectKitProvider, getDefaultConfig } from 'connectkit';
 import { defineChain } from 'viem';
 
 // Mezo Testnet Definition
@@ -19,20 +19,27 @@ export const mezoTestnet = defineChain({
   testnet: true,
 });
 
-const config = createConfig({
-  chains: [mezoTestnet],
-  transports: {
-    [mezoTestnet.id]: http(),
-  },
-});
+const config = createConfig(
+  getDefaultConfig({
+    // Your WalletConnect Project ID
+    walletConnectProjectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "3fd2994967399f666fca3b37a1e2f8f6",
+    appName: "ShopOS Mezo",
+    chains: [mezoTestnet],
+    transports: {
+      [mezoTestnet.id]: http(),
+    },
+  })
+);
 
 const queryClient = new QueryClient();
 
-export function Web3Provider({ children }: { children: ReactNode }) {
+export function Web3Provider({ children }: { children: React.ReactNode }) {
   return (
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
-        {children}
+        <ConnectKitProvider>
+          {children}
+        </ConnectKitProvider>
       </QueryClientProvider>
     </WagmiProvider>
   );
