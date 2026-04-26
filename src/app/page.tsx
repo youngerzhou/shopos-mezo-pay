@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ShoppingBag, Scan, History, RefreshCw, Activity, Database, CheckCircle2, Ticket, ArrowRight, Wallet, Percent, UserCheck, CreditCard, Sparkles, UserPlus, TrendingUp, Layers, QrCode } from 'lucide-react';
+import { ShoppingBag, Scan, History, RefreshCw, Activity, Database, CheckCircle2, Ticket, ArrowRight, Wallet, Percent, UserCheck, CreditCard, Sparkles, UserPlus, TrendingUp, Layers, QrCode, Settings, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Scanner } from '@/components/Scanner';
@@ -16,6 +16,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { WebhookDebugger } from '@/components/WebhookDebugger';
 import { QRCodeCanvas } from 'qrcode.react';
 import Link from 'next/link';
+import { ContractInteraction } from '@/components/ContractInteraction';
 
 export default function ShoposMezo() {
   return (
@@ -49,8 +50,25 @@ function ShoposMezoContent() {
   const [sseStatus, setSseStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
   const [progress, setProgress] = useState(10);
   const [lastHeartbeat, setLastHeartbeat] = useState<string | null>(null);
+  const [merchantAddress, setMerchantAddress] = useState<string>('0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7');
 
   const DEFAULT_PRICE = 1;
+
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch('/api/admin/settings');
+      const data = await res.json();
+      if (data.Merchant_Wallet_Address) {
+        setMerchantAddress(data.Merchant_Wallet_Address);
+      }
+    } catch (err) {
+      console.error('Failed to fetch settings:', err);
+    }
+  };
 
   // Phase 1: Onboarding check
   useEffect(() => {
@@ -173,6 +191,48 @@ function ShoposMezoContent() {
         setLoading(false);
       }
     }
+  };
+
+  const handlePaymentSuccess = async (txHash: string) => {
+    if (!order) return;
+    
+    setLoading(true);
+    try {
+      const res = await fetch('/api/orders', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: order.id,
+          status: 'paid',
+          txHash
+        })
+      });
+      
+      if (res.ok) {
+        setProgress(100);
+        setTimeout(() => setIsPaid(true), 800);
+        toast({
+          title: "Payment Confirmed!",
+          description: "Transaction successfully recorded on the Mezo blockchain.",
+        });
+      }
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Update Failed",
+        description: "Payment succeeded but database update failed. Please notify management."
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePaymentError = (error: string) => {
+    toast({
+      variant: "destructive",
+      title: "Payment Failed",
+      description: error.includes('rejected') ? "Transaction rejected by user." : "Check your balance or network connection."
+    });
   };
 
   const resetPOS = () => {
@@ -371,17 +431,26 @@ function ShoposMezoContent() {
                   </div>
                 </div>
 
-                <div className="space-y-4">
-                   <div className="relative">
-                    <Progress value={progress} className="h-2 bg-muted" />
+                  <div className="space-y-4">
+                     <div className="relative">
+                      <Progress value={progress} className="h-2 bg-muted" />
+                    </div>
+                    
+                    <ContractInteraction 
+                      orderId={order.id}
+                      amount={order.amount_musd}
+                      merchantAddress={merchantAddress}
+                      onSuccess={handlePaymentSuccess}
+                      onError={handlePaymentError}
+                    />
+
+                    <div className="flex items-center gap-4 p-4 bg-muted/30 rounded-2xl border border-dashed text-center">
+                      <RefreshCw className="w-5 h-5 text-muted-foreground animate-spin shrink-0" />
+                      <p className="text-[10px] text-muted-foreground font-medium text-left">
+                        Awaiting on-chain confirmation for <b>{order.amount_musd.toFixed(2)} MUSD</b>.
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-4 p-4 bg-muted/30 rounded-2xl border border-dashed text-center">
-                    <RefreshCw className="w-5 h-5 text-muted-foreground animate-spin shrink-0" />
-                    <p className="text-[10px] text-muted-foreground font-medium text-left">
-                      Listening for on-chain validation for <b>{order.amount_musd} MUSD</b>.
-                    </p>
-                  </div>
-                </div>
               </CardContent>
             </Card>
           </div>

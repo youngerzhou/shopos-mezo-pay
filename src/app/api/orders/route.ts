@@ -74,3 +74,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+
+export async function PUT(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { orderId, status, txHash } = body;
+
+    if (!orderId || !status) {
+      return NextResponse.json({ error: 'Missing orderId or status' }, { status: 400 });
+    }
+
+    const { getSql, ensureDb } = await import('@/app/lib/db');
+    await ensureDb();
+    const sql = getSql();
+    
+    const result = await sql`
+      UPDATE orders 
+      SET status = ${status}, tx_hash = ${txHash || null}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${orderId}
+      RETURNING *
+    `;
+
+    if (result.length === 0) {
+      return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(result[0]);
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}

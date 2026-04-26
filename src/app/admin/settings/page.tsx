@@ -16,7 +16,8 @@ import {
   Percent,
   TrendingUp,
   X,
-  Printer
+  Printer,
+  Wallet
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -219,6 +220,7 @@ function AdminSettingsContent() {
                    { key: 'Global_Discount_Rate', label: 'Default Discount Rate', icon: <Percent className="w-5 h-5" />, desc: 'Base discount for all members (decimal format: 0.05 = 5%)' },
                    { key: 'Referral_Commission_Rate', label: 'Staff Commission', icon: <TrendingUp className="w-5 h-5" />, desc: 'Revenue share per successful transaction (decimal)' },
                    { key: 'Mezo_Passport_Bonus_Multiplier', label: 'Passport Multiplier', icon: <ShieldCheck className="w-5 h-5" />, desc: 'Extra bonus weight for high-level passport holders' },
+                   { key: 'Merchant_Wallet_Address', label: 'Merchant Recipient', icon: <Wallet className="w-5 h-5" />, desc: 'The on-chain destination for all customer payments' },
                  ].map((s) => (
                    <Card key={s.key} className="border-none shadow-sm overflow-hidden">
                      <CardHeader className="pb-3 border-b border-slate-50">

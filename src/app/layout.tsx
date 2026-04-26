@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: 'A mobile-first Mezo chain POS system for modern retail.',
 };
 
+import { Web3Provider } from '@/components/Web3Provider';
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -19,7 +21,11 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
       </head>
-      <body className="font-body antialiased">{children}</body>
+      <body className="font-body antialiased">
+        <Web3Provider>
+          {children}
+        </Web3Provider>
+      </body>
     </html>
   );
 }
