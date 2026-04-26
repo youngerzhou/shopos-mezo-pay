@@ -98,6 +98,9 @@ export async function initDb() {
     
     console.log('Database schema synchronized successfully based on definition');
     
+    // Phase 1 FIX: Ensure wallet_address is nullable in customers table for new dual-scan workflow
+    await (sql as any).query(`ALTER TABLE customers ALTER COLUMN wallet_address DROP NOT NULL`);
+    
     // Seed a demo staff member if none exists
     const demoStaff = await sql`SELECT 1 FROM staff WHERE staff_id = 'STAFF001'`;
     if (demoStaff.length === 0) {
@@ -187,16 +190,33 @@ export async function getCustomerByReferralId(referralId: string) {
   return results[0];
 }
 
-export async function createCustomer(wallet_address: string, referral_id: string, level: number = 1, referred_by_staff_id?: string) {
+export async function createCustomer(referral_id: string, level: number = 1, referred_by_staff_id?: string, wallet_address?: string) {
   await ensureDb();
   const sql = getSql();
   const id = Math.random().toString(36).substring(7);
-  const normalizedWallet = wallet_address.toLowerCase().trim();
+  const normalizedWallet = wallet_address ? wallet_address.toLowerCase().trim() : null;
   
   const results = await sql`
     INSERT INTO customers (id, wallet_address, referral_id, level, referred_by_staff_id)
     VALUES (${id}, ${normalizedWallet}, ${referral_id}, ${level}, ${referred_by_staff_id})
-    ON CONFLICT (wallet_address) DO UPDATE SET level = EXCLUDED.level, referred_by_staff_id = EXCLUDED.referred_by_staff_id
+    ON CONFLICT (referral_id) DO UPDATE SET 
+      level = EXCLUDED.level, 
+      referred_by_staff_id = EXCLUDED.referred_by_staff_id,
+      wallet_address = COALESCE(customers.wallet_address, EXCLUDED.wallet_address)
+    RETURNING *
+  `;
+  return results[0];
+}
+
+export async function bindWalletToCustomer(referral_id: string, wallet_address: string) {
+  await ensureDb();
+  const sql = getSql();
+  const normalizedWallet = wallet_address.toLowerCase().trim();
+  
+  const results = await sql`
+    UPDATE customers 
+    SET wallet_address = ${normalizedWallet}
+    WHERE referral_id = ${referral_id} AND wallet_address IS NULL
     RETURNING *
   `;
   return results[0];

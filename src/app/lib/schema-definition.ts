@@ -31,7 +31,7 @@ export const SCHEMA_DEFINITION = {
   },
   customers: {
     id: "TEXT PRIMARY KEY",
-    wallet_address: "TEXT UNIQUE NOT NULL",
+    wallet_address: "TEXT", // Removed UNIQUE NOT NULL to allow initial onboarding without wallet
     referral_id: "TEXT UNIQUE NOT NULL", // Unique string for referrals
     referred_by_staff_id: "TEXT", // Added to track staff referrals
     level: "INTEGER DEFAULT 1",
