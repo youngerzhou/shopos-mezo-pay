@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { ShoppingBag, Scan, History, RefreshCw, Activity, Database, CheckCircle2, Ticket, ArrowRight, Wallet, Percent, UserCheck, CreditCard, Sparkles, UserPlus, TrendingUp, Layers, QrCode, Settings, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -32,10 +32,25 @@ export default function ShoposMezo() {
 
 function ShoposMezoContent() {
   const { toast } = useToast();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const staffPromoId = searchParams?.get('staff_promo');
+  const promoId = searchParams?.get('promo');
+  const activePromo = promoId || staffPromoId;
+  
   const userRole = searchParams?.get('role') || 'staff'; // admin, manager, staff
   const storeId = searchParams?.get('store_id') || 'STORE_A';
+
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
+  // Redirection Logic: If a promo code is present and no explicit role is defined, redirect to /register
+  useEffect(() => {
+    const hasExplicitRole = searchParams?.has('role');
+    if (activePromo && !hasExplicitRole) {
+      setIsRedirecting(true);
+      router.push(`/register?staff_promo=${activePromo}`);
+    }
+  }, [activePromo, router, searchParams]);
   
   const [viewMode, setViewMode] = useState<'pos'>('pos');
   const [isScanning, setIsScanning] = useState(false);
@@ -220,6 +235,21 @@ function ShoposMezoContent() {
   };
 
   if (isPaid) return <SuccessFeedback onDone={resetPOS} />;
+  
+  if (isRedirecting) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center space-y-6">
+        <div className="w-16 h-16 rounded-3xl bg-primary flex items-center justify-center shadow-xl animate-bounce">
+          <UserPlus className="w-8 h-8 text-white" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-xl font-black text-primary">Joining Ecosystem...</h2>
+          <p className="text-sm text-muted-foreground font-medium">Redirecting you to the Mezo Registration portal.</p>
+        </div>
+        <RefreshCw className="w-6 h-6 animate-spin text-primary/20" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col max-w-md mx-auto shadow-2xl border-x border-border/50">

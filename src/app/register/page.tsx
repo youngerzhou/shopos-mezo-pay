@@ -106,10 +106,15 @@ function RegisterContent() {
             >
               <div className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-slate-100 space-y-6">
                 <div className="space-y-2">
-                  <h2 className="text-xl font-black text-slate-800">
-                    {staffName ? `Invited by ${staffName}` : 'Join the Ecosystem'}
+                  <h2 className="text-2xl font-black text-slate-800 tracking-tight">
+                    Welcome to ShopOS Mezo!
                   </h2>
-                  <p className="text-sm font-medium text-slate-500">Register now to instantly unlock a 5% discount on all ShopOS transactions.</p>
+                  <p className="text-sm font-medium text-slate-500">
+                    {staffName ? `You've been invited by ${staffName}.` : 'Join the Mezo ecosystem today.'}
+                  </p>
+                  <p className="text-[10px] font-bold text-primary uppercase tracking-widest bg-primary/5 py-1 px-3 rounded-full inline-block">
+                    Instant 5% Discount
+                  </p>
                 </div>
 
                 <form onSubmit={handleRegister} className="space-y-4">
