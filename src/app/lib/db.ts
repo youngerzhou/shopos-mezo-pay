@@ -21,6 +21,7 @@ export interface Transaction {
   passport_level?: number;
   referral_id?: string;
   commission_amount?: number;
+  session_token?: string;
 }
 
 export type Order = Transaction;
@@ -96,6 +97,16 @@ export async function initDb() {
     }
     
     console.log('Database schema synchronized successfully based on definition');
+    
+    // Seed a demo staff member if none exists
+    const demoStaff = await sql`SELECT 1 FROM staff WHERE staff_id = 'STAFF001'`;
+    if (demoStaff.length === 0) {
+      console.log('[Seed] Seeding demo staff member...');
+      await sql`
+        INSERT INTO staff (id, username, password_hash, staff_id)
+        VALUES ('s1', 'demo_staff', 'hashed_pass', 'STAFF001')
+      `;
+    }
   } catch (err) {
     console.error('Database schema synchronization failed:', err);
   }
@@ -112,7 +123,8 @@ export async function createTransaction(
   discountRate?: number,
   passportLevel?: number,
   referralId?: string,
-  commissionAmount?: number
+  commissionAmount?: number,
+  sessionToken?: string
 ): Promise<any> {
   await ensureDb();
   const sql = getSql();
@@ -125,8 +137,8 @@ export async function createTransaction(
   const discRate = discountRate || 0;
 
   const results = await sql`
-    INSERT INTO transactions (id, recipient, sender, amount, original_amount, discount_rate, final_amount, passport_level, referral_id, commission_amount, status) 
-    VALUES (${id}, ${normalizedRecipient}, ${normalizedSender}, ${finalAmount}, ${origAmount}, ${discRate}, ${finalAmount}, ${passportLevel}, ${referralId}, ${commissionAmount}, 'pending')
+    INSERT INTO transactions (id, recipient, sender, amount, original_amount, discount_rate, final_amount, passport_level, referral_id, commission_amount, session_token, status) 
+    VALUES (${id}, ${normalizedRecipient}, ${normalizedSender}, ${finalAmount}, ${origAmount}, ${discRate}, ${finalAmount}, ${passportLevel}, ${referralId}, ${commissionAmount}, ${sessionToken}, 'pending')
     RETURNING 
       id, 
       recipient as wallet_address, 
@@ -138,6 +150,7 @@ export async function createTransaction(
       passport_level,
       referral_id,
       commission_amount::float,
+      session_token,
       status, 
       transaction_hash, 
       created_at
@@ -157,10 +170,11 @@ export async function createOrder(
   discountRate?: number,
   passportLevel?: number,
   referralId?: string,
-  commissionAmount?: number
+  commissionAmount?: number,
+  sessionToken?: string
 ) {
   // walletAddress is recipient in this POS context
-  return createTransaction(walletAddress, amount, senderOrRecipient, originalAmount, discountRate, passportLevel, referralId, commissionAmount);
+  return createTransaction(walletAddress, amount, senderOrRecipient, originalAmount, discountRate, passportLevel, referralId, commissionAmount, sessionToken);
 }
 
 /**
@@ -173,18 +187,62 @@ export async function getCustomerByReferralId(referralId: string) {
   return results[0];
 }
 
-export async function createCustomer(walletAddress: string, referralId: string, level: number = 1) {
+export async function createCustomer(wallet_address: string, referral_id: string, level: number = 1, referred_by_staff_id?: string) {
   await ensureDb();
   const sql = getSql();
   const id = Math.random().toString(36).substring(7);
-  const normalizedWallet = walletAddress.toLowerCase().trim();
+  const normalizedWallet = wallet_address.toLowerCase().trim();
   
   const results = await sql`
-    INSERT INTO customers (id, wallet_address, referral_id, level)
-    VALUES (${id}, ${normalizedWallet}, ${referralId}, ${level})
-    ON CONFLICT (wallet_address) DO UPDATE SET referral_id = EXCLUDED.referral_id
+    INSERT INTO customers (id, wallet_address, referral_id, level, referred_by_staff_id)
+    VALUES (${id}, ${normalizedWallet}, ${referral_id}, ${level}, ${referred_by_staff_id})
+    ON CONFLICT (wallet_address) DO UPDATE SET level = EXCLUDED.level, referred_by_staff_id = EXCLUDED.referred_by_staff_id
     RETURNING *
   `;
+  return results[0];
+}
+
+/**
+ * Staff and Registration helpers
+ */
+export async function getStaffByStaffId(staffId: string) {
+  await ensureDb();
+  const sql = getSql();
+  const results = await sql`SELECT * FROM staff WHERE staff_id = ${staffId}`;
+  return results[0];
+}
+
+export async function createPendingRegistration(staffId: string, sessionToken: string) {
+  await ensureDb();
+  const sql = getSql();
+  const id = Math.random().toString(36).substring(7);
+  const results = await sql`
+    INSERT INTO pending_registrations (id, session_token, staff_id)
+    VALUES (${id}, ${sessionToken}, ${staffId})
+    ON CONFLICT (session_token) DO UPDATE SET staff_id = EXCLUDED.staff_id
+    RETURNING *
+  `;
+  return results[0];
+}
+
+export async function getPendingRegistration(sessionToken: string) {
+  await ensureDb();
+  const sql = getSql();
+  const results = await sql`SELECT * FROM pending_registrations WHERE session_token = ${sessionToken}`;
+  return results[0];
+}
+
+export async function incrementStaffReferral(staffId: string) {
+  await ensureDb();
+  const sql = getSql();
+  await sql`UPDATE staff SET total_referrals = total_referrals + 1 WHERE staff_id = ${staffId}`;
+}
+
+export async function getCustomerByWallet(walletAddress: string) {
+  await ensureDb();
+  const sql = getSql();
+  const normalizedWallet = walletAddress.toLowerCase().trim();
+  const results = await sql`SELECT * FROM customers WHERE LOWER(wallet_address) = ${normalizedWallet}`;
   return results[0];
 }
 
@@ -206,6 +264,7 @@ export async function getTransaction(id: string): Promise<any | undefined> {
       passport_level,
       referral_id,
       commission_amount::float,
+      session_token,
       status, 
       transaction_hash, 
       created_at 
@@ -313,6 +372,23 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
 
   if (results[0]) {
     console.log('ORDER_UPDATED_SUCCESSFULLY: ' + hash);
+    
+    // Auto-Bind Logic
+    const tx = results[0];
+    if (tx.sender) {
+      const existingCustomer = await getCustomerByWallet(tx.sender);
+      if (!existingCustomer && tx.session_token) {
+        const pending = await getPendingRegistration(tx.session_token);
+        if (pending) {
+          console.log(`[Auto-Bind] Binding wallet ${tx.sender} to staff ${pending.staff_id}`);
+          // Create new customer and link to referral ID
+          const newCustomerReferralId = 'ref_' + Math.random().toString(36).substring(7);
+          await createCustomer(tx.sender, newCustomerReferralId, tx.passport_level || 1, pending.staff_id);
+          // Increment staff referral count
+          await incrementStaffReferral(pending.staff_id);
+        }
+      }
+    }
   }
 
   return results[0];

@@ -1,7 +1,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createOrder, getCustomerByReferralId } from '@/app/lib/db';
+import { createOrder, getCustomerByReferralId, getStaffByStaffId, createPendingRegistration } from '@/app/lib/db';
 import { getPassportLevel, calculateDiscountedPrice } from '@/app/lib/passport';
+import { cookies } from 'next/headers';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +10,15 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { walletAddress, amount, referralId } = body;
+
+    const cookieStore = await cookies();
+    let sessionToken = cookieStore.get('shopos_session')?.value;
+    
+    if (!sessionToken) {
+      sessionToken = Math.random().toString(36).substring(2, 15);
+      // We don't necessarily need to set it here if we just use it for the order, 
+      // but it's better if the client has it.
+    }
 
     if (!walletAddress) {
       return NextResponse.json({ error: 'Missing walletAddress' }, { status: 400 });
@@ -27,13 +37,23 @@ export async function POST(req: NextRequest) {
 
     // 2. Validate Referral if provided
     if (referralId) {
+      // Try customer referral
       const referrer = await getCustomerByReferralId(referralId);
       if (referrer) {
         validatedReferralId = referralId;
-        // Apply additional 5% universal referral discount
         finalDiscountRate += 0.05;
-        // Calculate 5% commission for referrer
         commissionAmount = baseAmount * 0.05;
+      } else {
+        // Try staff referral
+        const staff = await getStaffByStaffId(referralId);
+        if (staff) {
+          validatedReferralId = referralId; // Use staff_id as referral identifier
+          finalDiscountRate += 0.05;
+          commissionAmount = 0; // Staff might have different incentive structure, but for now we track them
+          
+          // Create pending registration for auto-binding
+          await createPendingRegistration(staff.staff_id, sessionToken);
+        }
       }
     }
 
@@ -51,14 +71,24 @@ export async function POST(req: NextRequest) {
       finalDiscountRate, 
       level,
       validatedReferralId || undefined,
-      commissionAmount
+      commissionAmount,
+      sessionToken
     );
     
-    return NextResponse.json({
+    const response = NextResponse.json({
       ...order,
       passport_level: level,
       referral_applied: !!validatedReferralId
     });
+
+    // Set sample session cookie if it wasn't there
+    response.cookies.set('shopos_session', sessionToken, { 
+      path: '/', 
+      maxAge: 60 * 60 * 24, // 24 hours
+      httpOnly: true 
+    });
+
+    return response;
   } catch (error: any) {
     console.error('API POST /api/orders Error:', error);
     
