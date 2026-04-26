@@ -1,8 +1,9 @@
 
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { ShoppingBag, Scan, History, RefreshCw, Activity, Database, CheckCircle2, Ticket, ArrowRight, Wallet } from 'lucide-react';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { ShoppingBag, Scan, History, RefreshCw, Activity, Database, CheckCircle2, Ticket, ArrowRight, Wallet, Percent } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Scanner } from '@/components/Scanner';
@@ -15,7 +16,21 @@ import { Toaster } from '@/components/ui/toaster';
 import { WebhookDebugger } from '@/components/WebhookDebugger';
 
 export default function ShoposMezo() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center">
+        <RefreshCw className="w-10 h-10 animate-spin text-muted-foreground" />
+      </div>
+    }>
+      <ShoposMezoContent />
+    </Suspense>
+  );
+}
+
+function ShoposMezoContent() {
   const { toast } = useToast();
+  const searchParams = useSearchParams();
+  const promoReferralId = searchParams?.get('promo');
   const [isScanning, setIsScanning] = useState(false);
   const [order, setOrder] = useState<Order | null>(null);
   const [isPaid, setIsPaid] = useState(false);
@@ -77,13 +92,24 @@ export default function ShoposMezo() {
       const res = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress: normalizedAddress, amount: DEFAULT_PRICE }),
+        body: JSON.stringify({ 
+          walletAddress: normalizedAddress, 
+          amount: DEFAULT_PRICE,
+          referralId: promoReferralId
+        }),
       });
       
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Order initialization failed');
       
       setOrder(data);
+
+      if (data.referral_applied) {
+        toast({
+          title: "Promo Applied!",
+          description: "5% referral discount has been added.",
+        });
+      }
 
       if (data.passport_level) {
         const discountPercent = Math.round(data.discount_rate * 100);
@@ -196,10 +222,17 @@ export default function ShoposMezo() {
                   <div className="space-y-1">
                     <p className="text-6xl font-black text-primary tracking-tighter">{order.amount_musd.toFixed(2)} MUSD</p>
                     {order.original_amount && order.original_amount > order.amount_musd && (
-                      <div className="flex items-center justify-center gap-2 text-xs font-bold text-muted-foreground">
-                        <span className="line-through">{order.original_amount.toFixed(2)} MUSD</span>
-                        <ArrowRight className="w-3 h-3" />
-                        <span className="text-secondary">-{Math.round((order.discount_rate || 0) * 100)}%</span>
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="flex items-center justify-center gap-2 text-xs font-bold text-muted-foreground">
+                          <span className="line-through">{order.original_amount.toFixed(2)} MUSD</span>
+                          <ArrowRight className="w-3 h-3" />
+                          <span className="text-secondary">-{Math.round((order.discount_rate || 0) * 100)}%</span>
+                        </div>
+                        {order.referral_id && (
+                          <Badge variant="outline" className="text-[9px] py-0 border-secondary/30 text-secondary font-bold flex items-center gap-1">
+                            <Percent className="w-2.5 h-2.5" /> Promo Discount Included
+                          </Badge>
+                        )}
                       </div>
                     )}
                   </div>

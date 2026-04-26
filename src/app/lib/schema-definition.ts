@@ -23,8 +23,17 @@ export const SCHEMA_DEFINITION = {
     status: "TEXT NOT NULL DEFAULT 'pending'",
     transaction_hash: "TEXT",
     passport_level: "INTEGER", // The new Mezo Passport Level column
+    referral_id: "TEXT", // The ID of the person who shared the code
+    commission_amount: "DECIMAL DEFAULT 0", // 5% payout calculated from original price
     created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
     updated_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+  },
+  customers: {
+    id: "TEXT PRIMARY KEY",
+    wallet_address: "TEXT UNIQUE NOT NULL",
+    referral_id: "TEXT UNIQUE NOT NULL", // Unique string for referrals
+    level: "INTEGER DEFAULT 1",
+    created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
   },
   webhook_logs: {
     id: "SERIAL PRIMARY KEY",

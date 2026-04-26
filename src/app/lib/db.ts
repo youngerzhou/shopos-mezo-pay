@@ -19,6 +19,8 @@ export interface Transaction {
   transaction_hash?: string;
   created_at: any;
   passport_level?: number;
+  referral_id?: string;
+  commission_amount?: number;
 }
 
 export type Order = Transaction;
@@ -108,7 +110,9 @@ export async function createTransaction(
   sender?: string,
   originalAmount?: number,
   discountRate?: number,
-  passportLevel?: number
+  passportLevel?: number,
+  referralId?: string,
+  commissionAmount?: number
 ): Promise<any> {
   await ensureDb();
   const sql = getSql();
@@ -121,8 +125,8 @@ export async function createTransaction(
   const discRate = discountRate || 0;
 
   const results = await sql`
-    INSERT INTO transactions (id, recipient, sender, amount, original_amount, discount_rate, final_amount, passport_level, status) 
-    VALUES (${id}, ${normalizedRecipient}, ${normalizedSender}, ${finalAmount}, ${origAmount}, ${discRate}, ${finalAmount}, ${passportLevel}, 'pending')
+    INSERT INTO transactions (id, recipient, sender, amount, original_amount, discount_rate, final_amount, passport_level, referral_id, commission_amount, status) 
+    VALUES (${id}, ${normalizedRecipient}, ${normalizedSender}, ${finalAmount}, ${origAmount}, ${discRate}, ${finalAmount}, ${passportLevel}, ${referralId}, ${commissionAmount}, 'pending')
     RETURNING 
       id, 
       recipient as wallet_address, 
@@ -132,6 +136,8 @@ export async function createTransaction(
       discount_rate::float, 
       final_amount::float, 
       passport_level,
+      referral_id,
+      commission_amount::float,
       status, 
       transaction_hash, 
       created_at
@@ -149,10 +155,37 @@ export async function createOrder(
   senderOrRecipient?: string, 
   originalAmount?: number, 
   discountRate?: number,
-  passportLevel?: number
+  passportLevel?: number,
+  referralId?: string,
+  commissionAmount?: number
 ) {
   // walletAddress is recipient in this POS context
-  return createTransaction(walletAddress, amount, senderOrRecipient, originalAmount, discountRate, passportLevel);
+  return createTransaction(walletAddress, amount, senderOrRecipient, originalAmount, discountRate, passportLevel, referralId, commissionAmount);
+}
+
+/**
+ * Customer helpers
+ */
+export async function getCustomerByReferralId(referralId: string) {
+  await ensureDb();
+  const sql = getSql();
+  const results = await sql`SELECT * FROM customers WHERE referral_id = ${referralId}`;
+  return results[0];
+}
+
+export async function createCustomer(walletAddress: string, referralId: string, level: number = 1) {
+  await ensureDb();
+  const sql = getSql();
+  const id = Math.random().toString(36).substring(7);
+  const normalizedWallet = walletAddress.toLowerCase().trim();
+  
+  const results = await sql`
+    INSERT INTO customers (id, wallet_address, referral_id, level)
+    VALUES (${id}, ${normalizedWallet}, ${referralId}, ${level})
+    ON CONFLICT (wallet_address) DO UPDATE SET referral_id = EXCLUDED.referral_id
+    RETURNING *
+  `;
+  return results[0];
 }
 
 /**
@@ -171,6 +204,8 @@ export async function getTransaction(id: string): Promise<any | undefined> {
       discount_rate::float,
       final_amount::float,
       passport_level,
+      referral_id,
+      commission_amount::float,
       status, 
       transaction_hash, 
       created_at 
@@ -269,6 +304,8 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
       discount_rate::float,
       final_amount::float,
       passport_level,
+      referral_id,
+      commission_amount::float,
       status, 
       transaction_hash, 
       created_at

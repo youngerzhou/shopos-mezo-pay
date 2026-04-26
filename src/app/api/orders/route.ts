@@ -1,18 +1,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createOrder } from '@/app/lib/db';
+import { createOrder, getCustomerByReferralId } from '@/app/lib/db';
 import { getPassportLevel, calculateDiscountedPrice } from '@/app/lib/passport';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * [Server Logic] 处理订单创建
- * 对应传统的 server.ts 部分逻辑
- */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { walletAddress, amount } = body;
+    const { walletAddress, amount, referralId } = body;
 
     if (!walletAddress) {
       return NextResponse.json({ error: 'Missing walletAddress' }, { status: 400 });
@@ -21,19 +17,47 @@ export async function POST(req: NextRequest) {
     // Default amount if not provided
     const baseAmount = amount || 1;
 
-    // Detect Passport Level and Calculate Discount
+    // 1. Detect Passport Level and Calculate initial Discount
     const level = getPassportLevel(walletAddress);
-    const { finalPrice, discountRate, originalPrice } = calculateDiscountedPrice(baseAmount, level);
+    const passportData = calculateDiscountedPrice(baseAmount, level);
 
-    // 使用 POS 机的固定收款地址作为 recipient，而不是用户的钱包地址
+    let finalDiscountRate = passportData.discountRate;
+    let validatedReferralId = null;
+    let commissionAmount = 0;
+
+    // 2. Validate Referral if provided
+    if (referralId) {
+      const referrer = await getCustomerByReferralId(referralId);
+      if (referrer) {
+        validatedReferralId = referralId;
+        // Apply additional 5% universal referral discount
+        finalDiscountRate += 0.05;
+        // Calculate 5% commission for referrer
+        commissionAmount = baseAmount * 0.05;
+      }
+    }
+
+    const finalPrice = baseAmount * (1 - finalDiscountRate);
+
+    // POS Machine fixed recipient
     const POS_RECIPIENT = "0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7";
     
-    // 调用 DB 逻辑创建订单 (POS机地址, 金额, 付款人地址, 原始金额, 折扣率, Passport等级)
-    const order = await createOrder(POS_RECIPIENT, finalPrice, walletAddress, originalPrice, discountRate, level);
+    // Create order with all fields
+    const order = await createOrder(
+      POS_RECIPIENT, 
+      finalPrice, 
+      walletAddress, 
+      baseAmount, 
+      finalDiscountRate, 
+      level,
+      validatedReferralId || undefined,
+      commissionAmount
+    );
     
     return NextResponse.json({
       ...order,
-      passport_level: level
+      passport_level: level,
+      referral_applied: !!validatedReferralId
     });
   } catch (error: any) {
     console.error('API POST /api/orders Error:', error);
