@@ -1,6 +1,7 @@
 {
-  "name": "Shopos Mezo",
-  "description": "Mezo Pay - Real-time crypto payment dashboard using Neon Serverless Postgres and Goldsky Indexer.",
-  "requestFramePermissions": [],
-  "majorCapabilities": []
+  "name": "ShopOS Mezo",
+  "description": "Mobile-friendly retail POS and loyalty ecosystem on Mezo Network",
+  "requestFramePermissions": [
+    "camera"
+  ]
 }

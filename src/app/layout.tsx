@@ -1,13 +1,14 @@
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import "./globals.css";
+import { Web3Provider } from "@/components/Web3Provider";
 
-import type {Metadata} from 'next';
-import './globals.css';
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'Shopos Mezo | Clothing Store POS',
-  description: 'A mobile-first Mezo chain POS system for modern retail.',
+  title: "ShopOS Mezo",
+  description: "Next-gen retail on Mezo Network",
 };
-
-import { Web3Provider } from '@/components/Web3Provider';
 
 export default function RootLayout({
   children,
@@ -16,12 +17,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-      </head>
-      <body className="font-body antialiased">
+      <body className={inter.className}>
         <Web3Provider>
           {children}
         </Web3Provider>

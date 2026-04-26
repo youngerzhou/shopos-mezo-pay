@@ -7,9 +7,9 @@ import { defineChain } from 'viem';
 
 // Mezo Testnet Definition
 export const mezoTestnet = defineChain({
-  id: 21712,
+  id: 2161,
   name: 'Mezo Testnet',
-  nativeCurrency: { name: 'BTC', symbol: 'BTC', decimals: 18 },
+  nativeCurrency: { name: 'Mezo BTC', symbol: 'mBTC', decimals: 18 },
   rpcUrls: {
     default: { http: ['https://rpc.test.mezo.org'] },
   },
@@ -21,7 +21,6 @@ export const mezoTestnet = defineChain({
 
 const config = createConfig(
   getDefaultConfig({
-    // Your WalletConnect Project ID
     walletConnectProjectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "3fd2994967399f666fca3b37a1e2f8f6",
     appName: "ShopOS Mezo",
     chains: [mezoTestnet],
