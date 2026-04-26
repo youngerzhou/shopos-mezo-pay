@@ -2,8 +2,28 @@
 import { neon, NeonQueryFunction } from '@neondatabase/serverless';
 
 /**
+ * Transaction Model and Status
+ */
+export type TransactionStatus = 'pending' | 'success' | 'failed';
+
+export interface Transaction {
+  id: string;
+  wallet_address: string;
+  sender?: string;
+  amount_musd: number;
+  original_amount?: number;
+  discount_rate?: number;
+  final_amount?: number;
+  status: string;
+  transaction_hash?: string;
+  created_at: any;
+  passport_level?: number;
+}
+
+export type Order = Transaction;
+
+/**
  * Global variable to hold the SQL client instance (singleton).
- * This prevents creating multiple connections in a serverless environment.
  */
 let cachedSql: NeonQueryFunction<false, false> | null = null;
 
@@ -46,17 +66,29 @@ export async function initDb() {
         sender TEXT,
         recipient TEXT NOT NULL,
         amount DECIMAL NOT NULL DEFAULT 1.00,
+        original_amount DECIMAL,
+        discount_rate DECIMAL DEFAULT 0,
+        final_amount DECIMAL,
         status TEXT NOT NULL DEFAULT 'pending',
         transaction_hash TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       
-      -- Ensure sender column exists for existing tables
+      -- Ensure new columns exist for existing tables
       DO $$
       BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='sender') THEN
           ALTER TABLE transactions ADD COLUMN sender TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='original_amount') THEN
+          ALTER TABLE transactions ADD COLUMN original_amount DECIMAL;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='discount_rate') THEN
+          ALTER TABLE transactions ADD COLUMN discount_rate DECIMAL DEFAULT 0;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='final_amount') THEN
+          ALTER TABLE transactions ADD COLUMN final_amount DECIMAL;
         END IF;
       END $$;
     `;
@@ -77,17 +109,27 @@ export async function initDb() {
 /**
  * Create a new transaction
  */
-export async function createTransaction(recipient: string, amount: number = 1.0, sender?: string): Promise<any> {
+export async function createTransaction(
+  recipient: string, 
+  amount: number = 1.0, 
+  sender?: string,
+  originalAmount?: number,
+  discountRate?: number
+): Promise<any> {
   await ensureDb();
   const sql = getSql();
   const id = Math.random().toString(36).substring(7);
   const normalizedRecipient = recipient.toLowerCase().trim();
   const normalizedSender = sender ? sender.toLowerCase().trim() : null;
+  
+  const finalAmount = amount;
+  const origAmount = originalAmount || amount;
+  const discRate = discountRate || 0;
 
   const results = await sql`
-    INSERT INTO transactions (id, recipient, sender, amount, status) 
-    VALUES (${id}, ${normalizedRecipient}, ${normalizedSender}, ${amount}, 'pending')
-    RETURNING id, recipient as wallet_address, sender, amount::float as amount_musd, status, transaction_hash, created_at
+    INSERT INTO transactions (id, recipient, sender, amount, original_amount, discount_rate, final_amount, status) 
+    VALUES (${id}, ${normalizedRecipient}, ${normalizedSender}, ${finalAmount}, ${origAmount}, ${discRate}, ${finalAmount}, 'pending')
+    RETURNING id, recipient as wallet_address, sender, amount::float as amount_musd, original_amount::float, discount_rate::float, final_amount::float, status, transaction_hash, created_at
   `;
 
   return results[0];
@@ -96,14 +138,9 @@ export async function createTransaction(recipient: string, amount: number = 1.0,
 /**
  * Compatibility alias for createOrder
  */
-export async function createOrder(walletAddress: string, amount: number = 1.0, senderOrRecipient?: string) {
-  // If only one param is passed, we assume it's the recipient and sender is unknown
-  // But given our new logic: walletAddress should be the recipient, and we might have sender
-  if (senderOrRecipient) {
-    // If three params, 1st is recipient, 2nd amount, 3rd sender
-    return createTransaction(walletAddress, amount, senderOrRecipient);
-  }
-  return createTransaction(walletAddress, amount);
+export async function createOrder(walletAddress: string, amount: number = 1.0, senderOrRecipient?: string, originalAmount?: number, discountRate?: number) {
+  // walletAddress is recipient in this POS context
+  return createTransaction(walletAddress, amount, senderOrRecipient, originalAmount, discountRate);
 }
 
 /**
@@ -113,7 +150,17 @@ export async function getTransaction(id: string): Promise<any | undefined> {
   await ensureDb();
   const sql = getSql();
   const results = await sql`
-    SELECT id, recipient as wallet_address, amount::float as amount_musd, status, transaction_hash, created_at 
+    SELECT 
+      id, 
+      recipient as wallet_address, 
+      sender,
+      amount::float as amount_musd, 
+      original_amount::float,
+      discount_rate::float,
+      final_amount::float,
+      status, 
+      transaction_hash, 
+      created_at 
     FROM transactions WHERE id = ${id}
   `;
   if (results.length === 0) return undefined;
@@ -200,7 +247,17 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
         amount = ${amount},
         updated_at = CURRENT_TIMESTAMP 
     WHERE id = ${pending[0].id}
-    RETURNING id, recipient as wallet_address, sender, amount::float as amount_musd, status, transaction_hash, created_at
+    RETURNING 
+      id, 
+      recipient as wallet_address, 
+      sender, 
+      amount::float as amount_musd, 
+      original_amount::float,
+      discount_rate::float,
+      final_amount::float,
+      status, 
+      transaction_hash, 
+      created_at
   `;
 
   if (results[0]) {

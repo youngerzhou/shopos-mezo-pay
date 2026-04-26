@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { ShoppingBag, Scan, History, RefreshCw, Activity, Database, CheckCircle2 } from 'lucide-react';
+import { ShoppingBag, Scan, History, RefreshCw, Activity, Database, CheckCircle2, Ticket, ArrowRight, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Scanner } from '@/components/Scanner';
@@ -84,6 +84,14 @@ export default function ShoposMezo() {
       if (!res.ok) throw new Error(data.message || 'Order initialization failed');
       
       setOrder(data);
+
+      if (data.passport_level) {
+        const discountPercent = Math.round(data.discount_rate * 100);
+        toast({
+          title: "Mezo Passport Detected!",
+          description: `Level ${data.passport_level} Passport. Found ${discountPercent}% discount.`,
+        });
+      }
       // Removed any simulation block. Now waiting for real Webhook.
 
     } catch (err: any) {
@@ -175,10 +183,31 @@ export default function ShoposMezo() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-8 pt-10">
-                <div className="text-center">
-                  <p className="text-6xl font-black text-primary mb-3 tracking-tighter">{order.amount_musd} MUSD</p>
+                <div className="text-center space-y-4">
+                  {order.passport_level && (
+                    <div className="flex justify-center -mb-2">
+                       <Badge className="bg-secondary hover:bg-secondary text-[10px] py-1 px-3 rounded-full flex items-center gap-1.5 border-none shadow-sm animate-bounce">
+                          <Ticket className="w-3 h-3" />
+                          Mezo Passport Lvl {order.passport_level}
+                       </Badge>
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <p className="text-6xl font-black text-primary tracking-tighter">{order.amount_musd.toFixed(2)} MUSD</p>
+                    {order.original_amount && order.original_amount > order.amount_musd && (
+                      <div className="flex items-center justify-center gap-2 text-xs font-bold text-muted-foreground">
+                        <span className="line-through">{order.original_amount.toFixed(2)} MUSD</span>
+                        <ArrowRight className="w-3 h-3" />
+                        <span className="text-secondary">-{Math.round((order.discount_rate || 0) * 100)}%</span>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="inline-flex flex-col items-center">
-                    <p className="text-[10px] text-muted-foreground font-bold uppercase mb-1">Payer Address</p>
+                    <p className="text-[10px] text-muted-foreground font-bold uppercase mb-1 flex items-center gap-1">
+                      <Wallet className="w-3 h-3" /> Payer Address
+                    </p>
                     <p className="text-[10px] text-primary font-mono bg-muted/50 py-1.5 px-4 rounded-full border">
                       {order.wallet_address.substring(0, 10)}...{order.wallet_address.substring(order.wallet_address.length - 10)}
                     </p>
