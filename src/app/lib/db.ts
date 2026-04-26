@@ -31,7 +31,7 @@ export type Order = Transaction;
  */
 let cachedSql: NeonQueryFunction<false, false> | null = null;
 
-const getSql = () => {
+export const getSql = () => {
   if (cachedSql) return cachedSql;
 
   const url = process.env.DATABASE_URL;
@@ -49,13 +49,32 @@ const getSql = () => {
   return cachedSql;
 };
 
-let initialized = false;
+export let initialized = false;
 
-async function ensureDb() {
+export async function ensureDb() {
   if (!initialized) {
     await initDb();
     initialized = true;
   }
+}
+
+/**
+ * Settings Helpers
+ */
+export async function getSetting(key: string, defaultValue: string): Promise<string> {
+  await ensureDb();
+  const sql = getSql();
+  const res = await sql`SELECT value FROM settings WHERE key = ${key}`;
+  return res[0]?.value || defaultValue;
+}
+
+export async function updateSetting(key: string, value: string) {
+  await ensureDb();
+  const sql = getSql();
+  await sql`
+    INSERT INTO settings (key, value) VALUES (${key}, ${value})
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+  `;
 }
 
 /**

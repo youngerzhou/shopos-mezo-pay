@@ -1,6 +1,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createOrder, getCustomerByReferralId, bindWalletToCustomer } from '@/app/lib/db';
+import { createOrder, getCustomerByReferralId, bindWalletToCustomer, getSetting } from '@/app/lib/db';
 import { getPassportLevel, calculateDiscountedPrice } from '@/app/lib/passport';
 import { cookies } from 'next/headers';
 
@@ -15,6 +15,11 @@ export async function POST(req: NextRequest) {
        return NextResponse.json({ error: 'Step 1 Missing: Scan Member Card' }, { status: 400 });
     }
 
+    // Load dynamic settings
+    const globalDiscountRate = parseFloat(await getSetting('Global_Discount_Rate', '0.05'));
+    const commissionRate = parseFloat(await getSetting('Referral_Commission_Rate', '0.05'));
+    const passportMultiplier = parseFloat(await getSetting('Mezo_Passport_Bonus_Multiplier', '1.0'));
+
     // 1. Verify Customer Identity (Retail CRM)
     const customer = await getCustomerByReferralId(customerId);
     if (!customer) {
@@ -22,7 +27,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Lock attribution and initial discount
-    let finalDiscountRate = 0.05; // Universal 5% for members
+    let finalDiscountRate = globalDiscountRate;
     let passportLevel = 0;
     
     // 3. Handle Payment Phase (Step 2)
@@ -36,12 +41,12 @@ export async function POST(req: NextRequest) {
       // Passport analysis
       passportLevel = getPassportLevel(walletAddress);
       const passportData = calculateDiscountedPrice(amount || 1, passportLevel);
-      finalDiscountRate += passportData.discountRate;
+      finalDiscountRate += (passportData.discountRate * passportMultiplier);
     }
 
     const baseAmount = amount || 1;
     const finalPrice = baseAmount * (1 - finalDiscountRate);
-    const commissionAmount = baseAmount * 0.05; // 5% for referrer/staff
+    const commissionAmount = baseAmount * commissionRate; 
 
     // POS Machine fixed recipient
     const POS_RECIPIENT = "0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7";

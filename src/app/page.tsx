@@ -236,11 +236,18 @@ function ShoposMezoContent() {
         </div>
         <div className="flex items-center gap-2">
           {userRole === 'admin' && (
-            <Link href="/admin/dashboard">
-              <Button size="icon" variant="outline" className="rounded-full shadow-sm">
-                <TrendingUp className="w-4 h-4 text-primary" />
-              </Button>
-            </Link>
+            <div className="flex gap-1">
+              <Link href="/admin/dashboard">
+                <Button size="icon" variant="outline" className="rounded-full shadow-sm">
+                  <TrendingUp className="w-4 h-4 text-primary" />
+                </Button>
+              </Link>
+              <Link href="/admin/settings">
+                <Button size="icon" variant="outline" className="rounded-full shadow-sm">
+                  <Settings className="w-4 h-4 text-slate-500" />
+                </Button>
+              </Link>
+            </div>
           )}
           {userRole === 'manager' && (
             <Link href={`/manager/dashboard?storeId=${storeId}`}>
@@ -287,14 +294,16 @@ function ShoposMezoContent() {
 
             <div className="grid grid-cols-1 gap-4">
               {userRole === 'admin' && (
-                <Button 
-                  size="lg" 
-                  variant="outline"
-                  className="h-16 rounded-2xl text-sm font-bold border-dashed border-2 border-primary/20 hover:border-primary/50 text-primary flex items-center gap-2 mb-2"
-                >
-                  <Database className="w-4 h-4" />
-                  <span>Manage Treasury Vault</span>
-                </Button>
+                <Link href="/admin/settings">
+                  <Button 
+                    size="lg" 
+                    variant="outline"
+                    className="w-full h-16 rounded-2xl text-sm font-bold border-dashed border-2 border-primary/20 hover:border-primary/50 text-primary flex items-center gap-2 mb-2"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Global Control Panel</span>
+                  </Button>
+                </Link>
               )}
 
               <Button 

@@ -51,6 +51,11 @@ export const SCHEMA_DEFINITION = {
     staff_id: "TEXT NOT NULL",
     created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
   },
+  settings: {
+    key: "TEXT PRIMARY KEY",
+    value: "TEXT NOT NULL",
+    updated_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+  },
   webhook_logs: {
     id: "SERIAL PRIMARY KEY",
     payload: "JSONB NOT NULL",
