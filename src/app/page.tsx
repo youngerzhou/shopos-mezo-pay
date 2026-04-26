@@ -56,6 +56,7 @@ function ShoposMezoContent() {
   const [isScanning, setIsScanning] = useState(false);
   const [scanStep, setScanStep] = useState<1 | 2>(1);
   const [scannedCustomerId, setScannedCustomerId] = useState<string | null>(null);
+  const [membershipTier, setMembershipTier] = useState<string | null>(null);
   
   const [order, setOrder] = useState<Order | null>(null);
   const [isPaid, setIsPaid] = useState(false);
@@ -153,6 +154,9 @@ function ShoposMezoContent() {
         if (!res.ok) throw new Error(orderData.error || 'Checkout failed');
         
         setOrder(orderData);
+        if (orderData.membership_tier) {
+          setMembershipTier(orderData.membership_tier);
+        }
         
         // Handle Fast Pay (Alipay Mode)
         if (orderData.fast_pay_triggered) {
@@ -240,6 +244,7 @@ function ShoposMezoContent() {
     setIsScanning(false);
     setScanStep(1);
     setScannedCustomerId(null);
+    setMembershipTier(null);
     setProgress(10);
     setLastHeartbeat(null);
     setViewMode('pos');
@@ -403,7 +408,9 @@ function ShoposMezoContent() {
             {scannedCustomerId && (
               <div className="p-4 bg-secondary/10 rounded-2xl border border-secondary/20 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <Badge className="bg-secondary text-primary font-black">MEMBER</Badge>
+                  <Badge className="bg-secondary text-primary font-black">
+                    {membershipTier ? `${membershipTier.toUpperCase()} MEMBER` : 'MEMBER'}
+                  </Badge>
                   <p className="text-xs font-mono font-bold">{scannedCustomerId}</p>
                 </div>
                 <Sparkles className="w-5 h-5 text-secondary animate-pulse" />

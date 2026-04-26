@@ -14,6 +14,49 @@ const publicClient = createPublicClient({
   transport: http(MEZO_RPC_URL)
 });
 
+export const ALLOWANCE_TIERS = [
+  { amount: 100, discount: 0.05, label: 'Silver' },
+  { amount: 500, discount: 0.08, label: 'Gold' },
+  { amount: 1000, discount: 0.10, label: 'Diamond' },
+];
+
+export function getTierForAllowance(allowanceInUnits: bigint) {
+  const allowance = Number(allowanceInUnits) / 1e18;
+  
+  let currentTier = { amount: 0, discount: 0, label: 'Standard' };
+  for (const tier of ALLOWANCE_TIERS) {
+    if (allowance >= tier.amount) {
+      currentTier = tier;
+    }
+  }
+  return currentTier;
+}
+
+export async function getOnChainAllowance(customerAddress: string): Promise<bigint> {
+  try {
+    const allowance = await publicClient.readContract({
+      address: MUSD_ADDRESS as `0x${string}`,
+      abi: [
+        {
+          name: 'allowance',
+          type: 'function',
+          inputs: [
+            { name: 'owner', type: 'address' },
+            { name: 'spender', type: 'address' }
+          ],
+          outputs: [{ name: '', type: 'uint256' }]
+        }
+      ],
+      functionName: 'allowance',
+      args: [customerAddress as `0x${string}`, SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`]
+    }) as bigint;
+    return allowance;
+  } catch (err) {
+    console.error('Allowance fetch failed:', err);
+    return 0n;
+  }
+}
+
 export async function checkFastPayAllowance(customerAddress: string, amount: number): Promise<boolean> {
   try {
     const allowance = await publicClient.readContract({

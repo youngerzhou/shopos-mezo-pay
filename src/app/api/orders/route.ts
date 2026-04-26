@@ -33,27 +33,40 @@ export async function POST(req: NextRequest) {
     // 1. Verify Customer Identity (Retail CRM)
     const customer = effectiveCustomerId ? await getCustomerByReferralId(effectiveCustomerId) : null;
     
-    // FAST PAY LOGIC: Alipay-style pull payment
+    // FAST PAY & TIERED DISCOUNT LOGIC: Fetch allowance and determine tier/discount
     let fastPayTriggered = false;
     let fastPayHash = null;
+    let allowanceDiscount = 0;
+    let membershipTierLabel = 'Standard';
 
-    if (customer?.fast_pay_enabled && walletAddress) {
-      const { checkFastPayAllowance, executePullPayment } = await import('@/app/lib/mezo-pull-payment');
-      const isAllowed = await checkFastPayAllowance(walletAddress, amount || 1);
+    if (walletAddress) {
+      const { getOnChainAllowance, getTierForAllowance, checkFastPayAllowance, executePullPayment } = await import('@/app/lib/mezo-pull-payment');
       
-      if (isAllowed) {
-        console.log(`[Fast Pay] TRIGGERED for customer ${walletAddress}`);
-        const POS_RECIPIENT = await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7');
-        fastPayHash = await executePullPayment(walletAddress, POS_RECIPIENT, amount || 1);
-        if (fastPayHash) {
-          fastPayTriggered = true;
+      // Fetch current on-chain allowance limit
+      const currentAllowance = await getOnChainAllowance(walletAddress);
+      const tierInfo = getTierForAllowance(currentAllowance);
+      
+      allowanceDiscount = tierInfo.discount;
+      membershipTierLabel = tierInfo.label;
+      console.log(`[Tiered Discount] Wallet: ${walletAddress} | Tier: ${membershipTierLabel} | Discount: ${allowanceDiscount}`);
+
+      // Handle Pull Payment if enabled
+      if (customer?.fast_pay_enabled) {
+        const isAllowed = await checkFastPayAllowance(walletAddress, amount || 1);
+        if (isAllowed) {
+          console.log(`[Fast Pay] TRIGGERED for customer ${walletAddress}`);
+          const POS_RECIPIENT = await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7');
+          fastPayHash = await executePullPayment(walletAddress, POS_RECIPIENT, amount || 1);
+          if (fastPayHash) {
+            fastPayTriggered = true;
+          }
         }
       }
     }
 
     // 2. Lock attribution and initial discount
-    // Guest = 0, Member = Global Discount
-    let finalDiscountRate = customer ? globalDiscountRate : 0;
+    // Guest = 0, Member = Global Discount + Tier Discount
+    let finalDiscountRate = customer ? (globalDiscountRate + allowanceDiscount) : 0;
     let passportLevel = 0;
     
     // 3. Handle Payment Phase (Step 2)
@@ -96,6 +109,7 @@ export async function POST(req: NextRequest) {
       ...order,
       customer_id: effectiveCustomerId,
       passport_level: passportLevel,
+      membership_tier: membershipTierLabel,
       referral_applied: !!customer,
       fast_pay_triggered: fastPayTriggered
     });

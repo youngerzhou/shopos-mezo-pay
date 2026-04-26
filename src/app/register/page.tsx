@@ -48,6 +48,7 @@ function RegisterContent() {
   });
   const [newMember, setNewMember] = useState<any>(null);
   const [fastPayActive, setFastPayActive] = useState(false);
+  const [selectedAllowance, setSelectedAllowance] = useState(100);
 
   const { address, isConnected } = useAccount();
   const { connect, connectors } = useConnect();
@@ -67,7 +68,7 @@ function RegisterContent() {
     hash: approveHash,
   });
 
-  const handleEnableFastPay = async () => {
+  const handleEnableFastPay = async (amount: number) => {
     if (!isConnected) {
       const injected = connectors.find(c => c.id === 'injected');
       if (injected) connect({ connector: injected });
@@ -76,6 +77,8 @@ function RegisterContent() {
 
     try {
       await switchChain({ chainId: mezoTestnet.id });
+
+      const amountUnits = amount === -1 ? maxUint256 : parseUnits(amount.toString(), 18);
 
       writeContract({
         address: MUSD_ADDRESS as `0x${string}`,
@@ -92,7 +95,7 @@ function RegisterContent() {
           },
         ],
         functionName: 'approve',
-        args: [SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`, maxUint256],
+        args: [SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`, amountUnits],
       });
     } catch (err: any) {
       toast({ variant: "destructive", title: "Approval Error", description: err.message });
@@ -408,21 +411,50 @@ function RegisterContent() {
                   <div className="absolute right-0 top-0 h-full w-12 bg-white/5 -skew-x-12 translate-x-12 group-hover:translate-x-0 transition-transform duration-500" />
                 </Button>
 
-                <Button 
-                   variant={fastPayActive ? "default" : "outline"}
-                   disabled={isApproving || isConfirmingApprove || fastPayActive}
-                   className={`w-full h-16 rounded-2xl font-black gap-3 overflow-hidden relative transition-all ${fastPayActive ? 'bg-emerald-500 border-none' : 'border-primary/20 text-primary'}`}
-                   onClick={handleEnableFastPay}
-                >
-                  {isApproving || isConfirmingApprove ? (
-                    <RefreshCw className="w-5 h-5 animate-spin" />
-                  ) : fastPayActive ? (
-                    <ShieldCheck className="w-5 h-5" />
-                  ) : (
-                    <Zap className="w-5 h-5" />
-                  )}
-                  {fastPayActive ? 'Fast Pay Enabled' : (isApproving || isConfirmingApprove ? 'Authorizing...' : 'Authorize Fast Pay (Alipay Mode)')}
-                </Button>
+                <div className="space-y-3 w-full bg-slate-50 p-6 rounded-[2rem] border border-slate-200">
+                  <div className="flex justify-between items-center mb-2">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Fast Pay Allowance Tiers</p>
+                    <p className="text-[10px] font-black text-primary uppercase bg-primary/5 px-2 py-1 rounded-md">Bonus Discount</p>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { amount: 100, label: '$100', discount: '5%' },
+                      { amount: 500, label: '$500', discount: '8%' },
+                      { amount: 1000, label: '$1000+', discount: '10%' }
+                    ].map((tier) => (
+                      <button
+                        key={tier.amount}
+                        className={`p-3 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all ${
+                          selectedAllowance === tier.amount 
+                          ? 'border-primary bg-primary/5 text-primary' 
+                          : 'border-slate-200 bg-white text-slate-400 hover:border-slate-300'
+                        }`}
+                        onClick={() => setSelectedAllowance(tier.amount)}
+                        disabled={fastPayActive}
+                      >
+                        <p className="text-sm font-black">{tier.label}</p>
+                        <p className="text-[8px] font-black uppercase opacity-60">{tier.discount} Off</p>
+                      </button>
+                    ))}
+                  </div>
+
+                  <Button 
+                    variant={fastPayActive ? "default" : "outline"}
+                    disabled={isApproving || isConfirmingApprove || fastPayActive}
+                    className={`w-full h-16 rounded-2xl font-black gap-3 overflow-hidden relative transition-all mt-2 ${fastPayActive ? 'bg-emerald-500 border-none' : 'border-primary/20 text-primary'}`}
+                    onClick={() => handleEnableFastPay(selectedAllowance)}
+                  >
+                    {isApproving || isConfirmingApprove ? (
+                      <RefreshCw className="w-5 h-5 animate-spin" />
+                    ) : fastPayActive ? (
+                      <ShieldCheck className="w-5 h-5" />
+                    ) : (
+                      <Zap className="w-5 h-5" />
+                    )}
+                    {fastPayActive ? 'Fast Pay Enabled' : (isApproving || isConfirmingApprove ? 'Authorizing...' : `Authorize ${selectedAllowance === 1000 ? '$1000+' : `$${selectedAllowance}`} Allowance`)}
+                  </Button>
+                </div>
 
                 <Button variant="outline" className="w-full h-16 rounded-2xl font-black gap-2 text-primary border-primary/20 bg-primary/5 hover:bg-primary/10" onClick={() => window.location.href = '/'}>
                   Start Shopping
