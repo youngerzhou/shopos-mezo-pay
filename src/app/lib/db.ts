@@ -71,7 +71,7 @@ export async function initDb() {
       const firstColDef = columns[firstCol as keyof typeof columns];
       
       // Basic creation if not exists
-      await sql(`CREATE TABLE IF NOT EXISTS ${tableName} (${firstCol} ${firstColDef})`);
+      await (sql as any).query(`CREATE TABLE IF NOT EXISTS ${tableName} (${firstCol} ${firstColDef})`);
       
       // 2. Check each column and ALTER if missing
       for (const [colName, colDef] of Object.entries(columns)) {
@@ -87,8 +87,8 @@ export async function initDb() {
         
         if (columnExists.length === 0) {
           console.log(`[Schema Sync] Adding missing column: ${colName} to ${tableName}`);
-          // Use raw query for DDL
-          await sql(`ALTER TABLE ${tableName} ADD COLUMN ${colName} ${colDef}`);
+          // Use .query for dynamic DDL where tagged templates are not suitable
+          await (sql as any).query(`ALTER TABLE ${tableName} ADD COLUMN ${colName} ${colDef}`);
         }
       }
     }
