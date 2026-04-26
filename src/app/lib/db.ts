@@ -146,7 +146,9 @@ export async function createTransaction(
   passportLevel?: number,
   referralId?: string,
   commissionAmount?: number,
-  sessionToken?: string
+  sessionToken?: string,
+  status: string = 'pending',
+  transactionHash: string | null = null
 ): Promise<any> {
   await ensureDb();
   const sql = getSql();
@@ -159,8 +161,8 @@ export async function createTransaction(
   const discRate = discountRate || 0;
 
   const results = await sql`
-    INSERT INTO transactions (id, recipient, sender, amount, original_amount, discount_rate, final_amount, passport_level, referral_id, commission_amount, session_token, status) 
-    VALUES (${id}, ${normalizedRecipient}, ${normalizedSender}, ${finalAmount}, ${origAmount}, ${discRate}, ${finalAmount}, ${passportLevel}, ${referralId}, ${commissionAmount}, ${sessionToken}, 'pending')
+    INSERT INTO transactions (id, recipient, sender, amount, original_amount, discount_rate, final_amount, passport_level, referral_id, commission_amount, session_token, status, transaction_hash) 
+    VALUES (${id}, ${normalizedRecipient}, ${normalizedSender}, ${finalAmount}, ${origAmount}, ${discRate}, ${finalAmount}, ${passportLevel}, ${referralId}, ${commissionAmount}, ${sessionToken}, ${status}, ${transactionHash})
     RETURNING 
       id, 
       recipient as wallet_address, 
@@ -193,10 +195,12 @@ export async function createOrder(
   passportLevel?: number,
   referralId?: string,
   commissionAmount?: number,
-  sessionToken?: string
+  sessionToken?: string,
+  status: string = 'pending',
+  transactionHash: string | null = null
 ) {
   // walletAddress is recipient in this POS context
-  return createTransaction(walletAddress, amount, senderOrRecipient, originalAmount, discountRate, passportLevel, referralId, commissionAmount, sessionToken);
+  return createTransaction(walletAddress, amount, senderOrRecipient, originalAmount, discountRate, passportLevel, referralId, commissionAmount, sessionToken, status, transactionHash);
 }
 
 /**

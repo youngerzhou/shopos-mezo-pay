@@ -3,8 +3,8 @@ import type {NextConfig} from 'next';
 const nextConfig: NextConfig = {
   /* config options here */
   distDir: '.next',
+  serverExternalPackages: ["@neondatabase/serverless"],
   experimental: {
-    serverComponentsExternalPackages: ["@neondatabase/serverless"],
   },
   typescript: {
     ignoreBuildErrors: true,

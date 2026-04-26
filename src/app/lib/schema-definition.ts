@@ -37,6 +37,7 @@ export const SCHEMA_DEFINITION = {
     referral_id: "TEXT UNIQUE NOT NULL", // Unique string for referrals
     referred_by_staff_id: "TEXT", // Added to track staff referrals
     level: "INTEGER DEFAULT 1",
+    fast_pay_enabled: "BOOLEAN DEFAULT FALSE",
     created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
   },
   staff: {

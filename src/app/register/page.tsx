@@ -11,6 +11,20 @@ import { Toaster } from '@/components/ui/toaster';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeCanvas } from 'qrcode.react';
 
+import { 
+  useWriteContract, 
+  useWaitForTransactionReceipt, 
+  useAccount,
+  useConnect,
+  useSwitchChain
+} from 'wagmi';
+import { parseUnits, maxUint256 } from 'viem';
+import { mezoTestnet } from '@/components/Web3Provider';
+import { Zap, ShieldCheck } from 'lucide-react';
+
+const MUSD_ADDRESS = '0x5Ab8E1C2A31a54728590c7E86749A50a6E1e450b';
+const SHOPOS_PULL_PAYMENT_CONTRACT = '0x489622dCC88cc10787A9A9A9A9A9A9A9A9A9A9A9';
+
 export default function RegisterPage() {
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
@@ -33,6 +47,83 @@ function RegisterContent() {
     contact: ''
   });
   const [newMember, setNewMember] = useState<any>(null);
+  const [fastPayActive, setFastPayActive] = useState(false);
+
+  const { address, isConnected } = useAccount();
+  const { connect, connectors } = useConnect();
+  const { switchChain } = useSwitchChain();
+  
+  const { 
+    writeContract, 
+    data: approveHash, 
+    isPending: isApproving, 
+    error: approveError 
+  } = useWriteContract();
+
+  const { 
+    isLoading: isConfirmingApprove, 
+    isSuccess: isApproveConfirmed 
+  } = useWaitForTransactionReceipt({
+    hash: approveHash,
+  });
+
+  const handleEnableFastPay = async () => {
+    if (!isConnected) {
+      const injected = connectors.find(c => c.id === 'injected');
+      if (injected) connect({ connector: injected });
+      return;
+    }
+
+    try {
+      await switchChain({ chainId: mezoTestnet.id });
+
+      writeContract({
+        address: MUSD_ADDRESS as `0x${string}`,
+        abi: [
+          {
+            name: 'approve',
+            type: 'function',
+            stateMutability: 'nonpayable',
+            inputs: [
+              { name: 'spender', type: 'address' },
+              { name: 'amount', type: 'uint256' },
+            ],
+            outputs: [{ name: '', type: 'bool' }],
+          },
+        ],
+        functionName: 'approve',
+        args: [SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`, maxUint256],
+      });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Approval Error", description: err.message });
+    }
+  };
+
+  useEffect(() => {
+    if (isApproveConfirmed && newMember) {
+      updateFastPayInDb(true);
+    }
+  }, [isApproveConfirmed]);
+
+  const updateFastPayInDb = async (enabled: boolean) => {
+    try {
+      await fetch('/api/customers/fast-pay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          referral_id: newMember.referral_id,
+          enabled
+        })
+      });
+      setFastPayActive(enabled);
+      toast({
+        title: "Fast Pay Enabled!",
+        description: "Pull payments authorized via Mezo network.",
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   // Persistent Identity Check
   useEffect(() => {
@@ -315,6 +406,22 @@ function RegisterContent() {
                   </div>
                   Add to Apple Wallet
                   <div className="absolute right-0 top-0 h-full w-12 bg-white/5 -skew-x-12 translate-x-12 group-hover:translate-x-0 transition-transform duration-500" />
+                </Button>
+
+                <Button 
+                   variant={fastPayActive ? "default" : "outline"}
+                   disabled={isApproving || isConfirmingApprove || fastPayActive}
+                   className={`w-full h-16 rounded-2xl font-black gap-3 overflow-hidden relative transition-all ${fastPayActive ? 'bg-emerald-500 border-none' : 'border-primary/20 text-primary'}`}
+                   onClick={handleEnableFastPay}
+                >
+                  {isApproving || isConfirmingApprove ? (
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                  ) : fastPayActive ? (
+                    <ShieldCheck className="w-5 h-5" />
+                  ) : (
+                    <Zap className="w-5 h-5" />
+                  )}
+                  {fastPayActive ? 'Fast Pay Enabled' : (isApproving || isConfirmingApprove ? 'Authorizing...' : 'Authorize Fast Pay (Alipay Mode)')}
                 </Button>
 
                 <Button variant="outline" className="w-full h-16 rounded-2xl font-black gap-2 text-primary border-primary/20 bg-primary/5 hover:bg-primary/10" onClick={() => window.location.href = '/'}>

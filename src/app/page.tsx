@@ -154,6 +154,17 @@ function ShoposMezoContent() {
         
         setOrder(orderData);
         
+        // Handle Fast Pay (Alipay Mode)
+        if (orderData.fast_pay_triggered) {
+          toast({
+            title: "Fast Pay Executed!",
+            description: "Alipay mode active. Pull payment initiated from customer wallet.",
+          });
+          setProgress(100);
+          setTimeout(() => setIsPaid(true), 1500);
+          return;
+        }
+
         // Handle Wallet Auto-Lookup Result
         if (orderData.customer_id && !scannedCustomerId) {
           setScannedCustomerId(orderData.customer_id);

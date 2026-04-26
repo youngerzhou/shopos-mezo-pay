@@ -33,6 +33,24 @@ export async function POST(req: NextRequest) {
     // 1. Verify Customer Identity (Retail CRM)
     const customer = effectiveCustomerId ? await getCustomerByReferralId(effectiveCustomerId) : null;
     
+    // FAST PAY LOGIC: Alipay-style pull payment
+    let fastPayTriggered = false;
+    let fastPayHash = null;
+
+    if (customer?.fast_pay_enabled && walletAddress) {
+      const { checkFastPayAllowance, executePullPayment } = await import('@/app/lib/mezo-pull-payment');
+      const isAllowed = await checkFastPayAllowance(walletAddress, amount || 1);
+      
+      if (isAllowed) {
+        console.log(`[Fast Pay] TRIGGERED for customer ${walletAddress}`);
+        const POS_RECIPIENT = await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7');
+        fastPayHash = await executePullPayment(walletAddress, POS_RECIPIENT, amount || 1);
+        if (fastPayHash) {
+          fastPayTriggered = true;
+        }
+      }
+    }
+
     // 2. Lock attribution and initial discount
     // Guest = 0, Member = Global Discount
     let finalDiscountRate = customer ? globalDiscountRate : 0;
@@ -55,11 +73,11 @@ export async function POST(req: NextRequest) {
     const baseAmount = amount || 1;
     const finalPrice = baseAmount * (1 - finalDiscountRate);
     const commissionAmount = customer ? (baseAmount * commissionRate) : 0; 
-
+    
     // POS Machine fixed recipient
     const POS_RECIPIENT = await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7');
     
-    // Create order
+    // Create order (With Fast Pay status if applicable)
     const order = await createOrder(
       POS_RECIPIENT, 
       finalPrice, 
@@ -68,14 +86,18 @@ export async function POST(req: NextRequest) {
       finalDiscountRate, 
       passportLevel,
       customer?.referred_by_staff_id || null,
-      commissionAmount
+      commissionAmount,
+      null, // sessionToken
+      fastPayTriggered ? 'success' : 'pending',
+      fastPayHash
     );
     
     return NextResponse.json({
       ...order,
       customer_id: effectiveCustomerId,
       passport_level: passportLevel,
-      referral_applied: !!customer
+      referral_applied: !!customer,
+      fast_pay_triggered: fastPayTriggered
     });
   } catch (error: any) {
     console.error('API POST /api/orders Error:', error);
@@ -97,8 +119,8 @@ export async function PUT(req: NextRequest) {
     const sql = getSql();
     
     const result = await sql`
-      UPDATE orders 
-      SET status = ${status}, tx_hash = ${txHash || null}, updated_at = CURRENT_TIMESTAMP
+      UPDATE transactions 
+      SET status = ${status}, transaction_hash = ${txHash || null}, updated_at = CURRENT_TIMESTAMP
       WHERE id = ${orderId}
       RETURNING *
     `;
