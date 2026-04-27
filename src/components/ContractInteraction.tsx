@@ -9,6 +9,7 @@ import {
   useSwitchChain
 } from 'wagmi';
 import { parseUnits } from 'viem';
+import { roundMoney2 } from '@/app/lib/money';
 import { Button } from '@/components/ui/button';
 import { RefreshCw, CheckCircle2, AlertCircle, Wallet } from 'lucide-react';
 import { mezoTestnet } from '@/components/Web3Provider';
@@ -76,8 +77,8 @@ export function ContractInteraction({
       // Ensure we are on Mezo Testnet
       await switchChain({ chainId: mezoTestnet.id });
 
-      // amount is in MUSD (assuming 18 decimals)
-      const amountInUnits = parseUnits(amount.toString(), 18);
+      // Human MUSD (2dp) → exact uint256 wei at 18 decimals
+      const amountInUnits = parseUnits(roundMoney2(amount).toFixed(2), 18);
 
       writeContract({
         address: MUSD_ADDRESS as `0x${string}`,

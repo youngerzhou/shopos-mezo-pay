@@ -14,6 +14,7 @@ import {
   checkFastPayAllowance,
   executePullPayment,
 } from '@/app/lib/mezo-pull-payment';
+import { roundMoney2, roundDiscountRate } from '@/app/lib/money';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,11 +22,12 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { customerId, walletAddress, amount } = body;
+    const baseAmount = roundMoney2(amount != null && amount !== '' ? Number(amount) : 1) || 1;
 
     // Load dynamic settings
-    const globalDiscountRate = parseFloat(await getSetting('Global_Discount_Rate', '0.05'));
-    const commissionRate = parseFloat(await getSetting('Referral_Commission_Rate', '0.05'));
-    const passportMultiplier = parseFloat(await getSetting('Mezo_Passport_Bonus_Multiplier', '1.0'));
+    const globalDiscountRate = roundDiscountRate(parseFloat(await getSetting('Global_Discount_Rate', '0.05')));
+    const commissionRate = roundDiscountRate(parseFloat(await getSetting('Referral_Commission_Rate', '0.05')));
+    const passportMultiplier = roundDiscountRate(parseFloat(await getSetting('Mezo_Passport_Bonus_Multiplier', '1.0')));
 
     let effectiveCustomerId = customerId;
 
@@ -60,11 +62,11 @@ export async function POST(req: NextRequest) {
 
       // Handle Pull Payment if enabled
       if (customer?.fast_pay_enabled) {
-        const isAllowed = await checkFastPayAllowance(walletAddress, amount || 1);
+        const isAllowed = await checkFastPayAllowance(walletAddress, baseAmount);
         if (isAllowed) {
           console.log(`[Fast Pay] TRIGGERED for customer ${walletAddress}`);
           const POS_RECIPIENT = await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7');
-          fastPayHash = await executePullPayment(walletAddress, POS_RECIPIENT, amount || 1);
+          fastPayHash = await executePullPayment(walletAddress, POS_RECIPIENT, baseAmount);
           if (fastPayHash) {
             fastPayTriggered = true;
           }
@@ -74,7 +76,9 @@ export async function POST(req: NextRequest) {
 
     // 2. Lock attribution and initial discount
     // Guest = 0, Member = Global Discount + Tier Discount
-    let finalDiscountRate = customer ? (globalDiscountRate + allowanceDiscount) : 0;
+    let finalDiscountRate = customer
+      ? roundDiscountRate(globalDiscountRate + allowanceDiscount)
+      : 0;
     let passportLevel = 0;
 
     // 3. Handle Payment Phase (Step 2)
@@ -87,13 +91,14 @@ export async function POST(req: NextRequest) {
 
       // Passport analysis
       passportLevel = getPassportLevel(walletAddress);
-      const passportData = calculateDiscountedPrice(amount || 1, (passportLevel || 1) as 1 | 2 | 3);
-      finalDiscountRate += (passportData.discountRate * passportMultiplier);
+      const passportData = calculateDiscountedPrice(baseAmount, (passportLevel || 1) as 1 | 2 | 3);
+      finalDiscountRate = roundDiscountRate(
+        finalDiscountRate + passportData.discountRate * passportMultiplier
+      );
     }
 
-    const baseAmount = amount || 1;
-    const finalPrice = baseAmount * (1 - finalDiscountRate);
-    const commissionAmount = customer ? (baseAmount * commissionRate) : 0;
+    const finalPrice = roundMoney2(baseAmount * (1 - finalDiscountRate));
+    const commissionAmount = roundMoney2(customer ? baseAmount * commissionRate : 0);
 
     // POS Machine fixed recipient
     const POS_RECIPIENT = await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7');

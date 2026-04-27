@@ -1,5 +1,5 @@
-
 import { neon, NeonQueryFunction } from '@neondatabase/serverless';
+import { roundMoney2, roundDiscountRate } from '@/app/lib/money';
 import { SCHEMA_DEFINITION } from './schema-definition';
 
 /**
@@ -156,13 +156,15 @@ export async function createTransaction(
   const normalizedRecipient = recipient.toLowerCase().trim();
   const normalizedSender = sender ? sender.toLowerCase().trim() : null;
   
-  const finalAmount = amount;
-  const origAmount = originalAmount || amount;
-  const discRate = discountRate || 0;
+  const finalAmount = roundMoney2(amount);
+  const origAmount = roundMoney2(originalAmount ?? amount);
+  const discRate = roundDiscountRate(discountRate || 0);
+  const commissionRounded =
+    commissionAmount != null ? roundMoney2(commissionAmount) : null;
 
   const results = await sql`
     INSERT INTO transactions (id, recipient, sender, amount, original_amount, discount_rate, final_amount, passport_level, referral_id, commission_amount, session_token, status, transaction_hash) 
-    VALUES (${id}, ${normalizedRecipient}, ${normalizedSender}, ${finalAmount}, ${origAmount}, ${discRate}, ${finalAmount}, ${passportLevel}, ${referralId}, ${commissionAmount}, ${sessionToken}, ${status}, ${transactionHash})
+    VALUES (${id}, ${normalizedRecipient}, ${normalizedSender}, ${finalAmount}, ${origAmount}, ${discRate}, ${finalAmount}, ${passportLevel}, ${referralId}, ${commissionRounded}, ${sessionToken}, ${status}, ${transactionHash})
     RETURNING 
       id, 
       recipient as wallet_address, 
@@ -353,12 +355,13 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
   const sql = getSql();
   const normalizedRecipient = recipient.toLowerCase().trim();
   const normalizedSender = sender ? sender.toLowerCase().trim() : null;
-  
+  const amountMatch = roundMoney2(amount);
+
   // Precise match: recipient + sender + amount
   let query = sql`
     SELECT id FROM transactions 
     WHERE LOWER(recipient) = ${normalizedRecipient} 
-    AND amount = ${amount}
+    AND amount = ${amountMatch}
     AND status = 'pending'
   `;
 
@@ -367,7 +370,7 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
       SELECT id FROM transactions 
       WHERE LOWER(recipient) = ${normalizedRecipient} 
       AND LOWER(sender) = ${normalizedSender}
-      AND amount = ${amount}
+      AND amount = ${amountMatch}
       AND status = 'pending' 
       ORDER BY created_at DESC 
       LIMIT 1
@@ -376,7 +379,7 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
     query = sql`
       SELECT id FROM transactions 
       WHERE LOWER(recipient) = ${normalizedRecipient} 
-      AND amount = ${amount}
+      AND amount = ${amountMatch}
       AND status = 'pending' 
       ORDER BY created_at DESC 
       LIMIT 1
@@ -394,7 +397,7 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
     UPDATE transactions 
     SET status = 'success', 
         transaction_hash = ${hash}, 
-        amount = ${amount},
+        amount = ${amountMatch},
         updated_at = CURRENT_TIMESTAMP 
     WHERE id = ${pending[0].id}
     RETURNING 

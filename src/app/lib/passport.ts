@@ -1,3 +1,4 @@
+import { roundMoney2 } from '@/app/lib/money';
 
 /**
  * Mock Mezo Passport Level Detection
@@ -22,12 +23,13 @@ export const PASSPORT_DISCOUNTS = {
 } as const;
 
 export function calculateDiscountedPrice(originalPrice: number, level: 1 | 2 | 3) {
+  const price = roundMoney2(originalPrice);
   const discount = PASSPORT_DISCOUNTS[level];
-  const discountAmount = originalPrice * discount.rate;
-  const finalPrice = originalPrice - discountAmount;
-  
+  const discountAmount = roundMoney2(price * discount.rate);
+  const finalPrice = roundMoney2(price - discountAmount);
+
   return {
-    originalPrice,
+    originalPrice: price,
     discountRate: discount.rate,
     discountAmount,
     finalPrice,

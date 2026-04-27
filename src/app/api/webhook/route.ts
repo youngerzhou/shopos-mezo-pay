@@ -1,6 +1,6 @@
-
 import { NextRequest, NextResponse } from 'next/server';
 import { updateTransactionByRecipient, logWebhook } from '@/app/lib/db';
+import { roundMoney2 } from '@/app/lib/money';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -71,9 +71,9 @@ export async function POST(req: NextRequest) {
       try {
         if (typeof rawAmount === 'string' && rawAmount.length > 15) {
           // Standard conversion for 18 decimals (Wei to Eth/Token)
-          amount = parseFloat(rawAmount) / 1e18;
+          amount = roundMoney2(parseFloat(rawAmount) / 1e18);
         } else {
-          amount = parseFloat(rawAmount);
+          amount = roundMoney2(parseFloat(rawAmount));
         }
       } catch (e) {
         console.warn('Amount conversion error:', e);

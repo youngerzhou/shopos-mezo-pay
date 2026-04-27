@@ -1,6 +1,6 @@
-
 import { NextRequest, NextResponse } from 'next/server';
 import { getSql, ensureDb } from '@/app/lib/db';
+import { roundMoney2 } from '@/app/lib/money';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,9 +30,12 @@ export async function GET(req: NextRequest) {
       `;
 
       return NextResponse.json({
-        total_revenue: revenue[0]?.total || 0,
+        total_revenue: roundMoney2(Number(revenue[0]?.total) || 0),
         total_referrals: referrals[0]?.total || 0,
-        store_stats: storeStats
+        store_stats: storeStats.map((row: { store_id: string; customer_count: number; store_revenue: number | null }) => ({
+          ...row,
+          store_revenue: roundMoney2(Number(row.store_revenue) || 0),
+        })),
       });
     }
 
@@ -52,7 +55,7 @@ export async function GET(req: NextRequest) {
 
       return NextResponse.json({
         store_id: storeId,
-        store_revenue: storeRevenue[0]?.total || 0,
+        store_revenue: roundMoney2(Number(storeRevenue[0]?.total) || 0),
         staff_performance: staffPerformance
       });
     }
