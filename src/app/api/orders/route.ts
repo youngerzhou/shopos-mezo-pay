@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
 
     // 1. Verify Customer Identity (Retail CRM)
     const customer = effectiveCustomerId ? await getCustomerByReferralId(effectiveCustomerId) : null;
-    
+
     // FAST PAY & TIERED DISCOUNT LOGIC: Fetch allowance and determine tier/discount
     let fastPayTriggered = false;
     let fastPayHash = null;
@@ -41,11 +41,11 @@ export async function POST(req: NextRequest) {
 
     if (walletAddress) {
       const { getOnChainAllowance, getTierForAllowance, checkFastPayAllowance, executePullPayment } = await import('@/app/lib/mezo-pull-payment');
-      
+
       // Fetch current on-chain allowance limit
       const currentAllowance = await getOnChainAllowance(walletAddress);
       const tierInfo = getTierForAllowance(currentAllowance);
-      
+
       allowanceDiscount = tierInfo.discount;
       membershipTierLabel = tierInfo.label;
       console.log(`[Tiered Discount] Wallet: ${walletAddress} | Tier: ${membershipTierLabel} | Discount: ${allowanceDiscount}`);
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     // Guest = 0, Member = Global Discount + Tier Discount
     let finalDiscountRate = customer ? (globalDiscountRate + allowanceDiscount) : 0;
     let passportLevel = 0;
-    
+
     // 3. Handle Payment Phase (Step 2)
     if (walletAddress) {
       // Auto-Bind: Permanent link if currently null and we have a confirmed customer
@@ -76,27 +76,27 @@ export async function POST(req: NextRequest) {
         console.log(`[Auto-Bind] Linking wallet ${walletAddress} to member ${effectiveCustomerId}`);
         await bindWalletToCustomer(effectiveCustomerId, walletAddress);
       }
-      
+
       // Passport analysis
       passportLevel = getPassportLevel(walletAddress);
-      const passportData = calculateDiscountedPrice(amount || 1, passportLevel);
+      const passportData = calculateDiscountedPrice(amount || 1, (passportLevel || 1) as 1 | 2 | 3);
       finalDiscountRate += (passportData.discountRate * passportMultiplier);
     }
 
     const baseAmount = amount || 1;
     const finalPrice = baseAmount * (1 - finalDiscountRate);
-    const commissionAmount = customer ? (baseAmount * commissionRate) : 0; 
-    
+    const commissionAmount = customer ? (baseAmount * commissionRate) : 0;
+
     // POS Machine fixed recipient
     const POS_RECIPIENT = await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7');
-    
+
     // Create order (With Fast Pay status if applicable)
     const order = await createOrder(
-      POS_RECIPIENT, 
-      finalPrice, 
-      walletAddress || 'pending_payment', 
-      baseAmount, 
-      finalDiscountRate, 
+      POS_RECIPIENT,
+      finalPrice,
+      walletAddress || 'pending_payment',
+      baseAmount,
+      finalDiscountRate,
       passportLevel,
       customer?.referred_by_staff_id || null,
       commissionAmount,
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
       fastPayTriggered ? 'success' : 'pending',
       fastPayHash
     );
-    
+
     return NextResponse.json({
       ...order,
       customer_id: effectiveCustomerId,
@@ -131,7 +131,7 @@ export async function PUT(req: NextRequest) {
     const { getSql, ensureDb } = await import('@/app/lib/db');
     await ensureDb();
     const sql = getSql();
-    
+
     const result = await sql`
       UPDATE transactions 
       SET status = ${status}, transaction_hash = ${txHash || null}, updated_at = CURRENT_TIMESTAMP
