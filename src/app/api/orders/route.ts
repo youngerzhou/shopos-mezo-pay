@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
       passportLevel,
       customer?.referred_by_staff_id || null,
       commissionAmount,
-      null, // sessionToken
+      undefined, // sessionToken
       fastPayTriggered ? 'success' : 'pending',
       fastPayHash
     );
