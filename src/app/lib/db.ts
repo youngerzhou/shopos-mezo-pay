@@ -92,8 +92,8 @@ export async function initDb() {
       const firstCol = colNames[0];
       const firstColDef = columns[firstCol as keyof typeof columns];
       
-      // Basic creation if not exists
-      await (sql as any).query(`CREATE TABLE IF NOT EXISTS ${tableName} (${firstCol} ${firstColDef})`);
+      // Basic creation if not exists (neon() returns a query fn, not pg Pool — use sql(string), not .query())
+      await sql(`CREATE TABLE IF NOT EXISTS ${tableName} (${firstCol} ${firstColDef})`);
       
       // 2. Check each column and ALTER if missing
       for (const [colName, colDef] of Object.entries(columns)) {
@@ -109,8 +109,7 @@ export async function initDb() {
         
         if (columnExists.length === 0) {
           console.log(`[Schema Sync] Adding missing column: ${colName} to ${tableName}`);
-          // Use .query for dynamic DDL where tagged templates are not suitable
-          await (sql as any).query(`ALTER TABLE ${tableName} ADD COLUMN ${colName} ${colDef}`);
+          await sql(`ALTER TABLE ${tableName} ADD COLUMN ${colName} ${colDef}`);
         }
       }
     }
@@ -118,7 +117,7 @@ export async function initDb() {
     console.log('Database schema synchronized successfully based on definition');
     
     // Phase 1 FIX: Ensure wallet_address is nullable in customers table for new dual-scan workflow
-    await (sql as any).query(`ALTER TABLE customers ALTER COLUMN wallet_address DROP NOT NULL`);
+    await sql(`ALTER TABLE customers ALTER COLUMN wallet_address DROP NOT NULL`);
     
     // Seed a demo staff member if none exists
     const demoStaff = await sql`SELECT 1 FROM staff WHERE staff_id = 'STAFF001'`;
