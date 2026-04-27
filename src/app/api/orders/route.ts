@@ -1,8 +1,19 @@
-
 import { NextRequest, NextResponse } from 'next/server';
-import { createOrder, getCustomerByReferralId, bindWalletToCustomer, getSetting } from '@/app/lib/db';
+import {
+  createOrder,
+  getCustomerByReferralId,
+  bindWalletToCustomer,
+  getSetting,
+  getSql,
+  ensureDb,
+} from '@/app/lib/db';
 import { getPassportLevel, calculateDiscountedPrice } from '@/app/lib/passport';
-import { cookies } from 'next/headers';
+import {
+  getOnChainAllowance,
+  getTierForAllowance,
+  checkFastPayAllowance,
+  executePullPayment,
+} from '@/app/lib/mezo-pull-payment';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +31,6 @@ export async function POST(req: NextRequest) {
 
     // WALLET AUTO-LOOKUP: If no member card scanned, check if wallet belongs to a member
     if (!effectiveCustomerId && walletAddress) {
-      const { getSql, ensureDb } = await import('@/app/lib/db');
       await ensureDb();
       const sql = getSql();
       const existingCustomer = await sql`SELECT referral_id FROM customers WHERE wallet_address = ${walletAddress}`;
@@ -40,8 +50,6 @@ export async function POST(req: NextRequest) {
     let membershipTierLabel = 'Standard';
 
     if (walletAddress) {
-      const { getOnChainAllowance, getTierForAllowance, checkFastPayAllowance, executePullPayment } = await import('@/app/lib/mezo-pull-payment');
-
       // Fetch current on-chain allowance limit
       const currentAllowance = await getOnChainAllowance(walletAddress);
       const tierInfo = getTierForAllowance(currentAllowance);
@@ -128,7 +136,6 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Missing orderId or status' }, { status: 400 });
     }
 
-    const { getSql, ensureDb } = await import('@/app/lib/db');
     await ensureDb();
     const sql = getSql();
 

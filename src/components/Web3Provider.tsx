@@ -3,21 +3,9 @@
 import { WagmiProvider, createConfig, http } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ConnectKitProvider, getDefaultConfig } from 'connectkit';
-import { defineChain } from 'viem';
+import { mezoTestnet } from '@/app/lib/mezo-chain';
 
-// Mezo Testnet Definition
-export const mezoTestnet = defineChain({
-  id: 2161,
-  name: 'Mezo Testnet',
-  nativeCurrency: { name: 'Mezo BTC', symbol: 'mBTC', decimals: 18 },
-  rpcUrls: {
-    default: { http: ['https://rpc.test.mezo.org'] },
-  },
-  blockExplorers: {
-    default: { name: 'MezoScan', url: 'https://explorer.test.mezo.org' },
-  },
-  testnet: true,
-});
+export { mezoTestnet };
 
 const config = createConfig(
   getDefaultConfig({
