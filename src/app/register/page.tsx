@@ -2,20 +2,20 @@
 
 import React, { useCallback, useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { 
-  UserPlus, 
-  Sparkles, 
-  CheckCircle2, 
-  Ticket, 
-  Smartphone, 
-  Mail, 
-  ArrowRight, 
-  UserCheck, 
-  Wallet, 
-  RefreshCw, 
-  Zap, 
-  ShieldCheck, 
-  Info 
+import {
+  UserPlus,
+  Sparkles,
+  CheckCircle2,
+  Ticket,
+  Smartphone,
+  Mail,
+  ArrowRight,
+  UserCheck,
+  Wallet,
+  RefreshCw,
+  Zap,
+  ShieldCheck,
+  Info
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,10 +24,10 @@ import { Toaster } from '@/components/ui/toaster';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeCanvas } from 'qrcode.react';
 
-import { 
+import {
   useWalletClient,
-  useWriteContract, 
-  useWaitForTransactionReceipt, 
+  useWriteContract,
+  useWaitForTransactionReceipt,
   useAccount,
   useSignMessage,
   useSwitchChain,
@@ -55,6 +55,7 @@ export default function RegisterPage() {
 function RegisterContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const promoCode = searchParams?.get('promo');
   const staffPromoId = searchParams?.get('staff_promo');
   const { toast } = useToast();
   const { setOpen } = useModal();
@@ -81,17 +82,17 @@ function RegisterContent() {
   const { switchChain } = useSwitchChain();
   const chainId = useChainId();
   const { data: walletClient, isLoading: isWalletClientLoading } = useWalletClient();
-  
-  const { 
-    writeContractAsync, 
-    data: approveHash, 
-    isPending: isApproving, 
+
+  const {
+    writeContractAsync,
+    data: approveHash,
+    isPending: isApproving,
   } = useWriteContract();
   const { signMessage, isPending: isSigningMessage } = useSignMessage();
 
-  const { 
-    isLoading: isConfirmingApprove, 
-    isSuccess: isApproveConfirmed 
+  const {
+    isLoading: isConfirmingApprove,
+    isSuccess: isApproveConfirmed
   } = useWaitForTransactionReceipt({
     hash: approveHash,
   });
@@ -191,8 +192,12 @@ function RegisterContent() {
       { message: 'Welcome to Mezo Pay! Please sign this to verify your identity.' },
       {
         onSuccess: () => {
-          setWalletGuidance('Signature verified. Redirecting to dashboard...');
-          router.push('/dashboard');
+          setWalletGuidance('Signature verified. Redirecting...');
+          if (promoCode) {
+            router.push(`/customer/membership-card?staffId=${promoCode}`);
+          } else {
+            router.push('/dashboard');
+          }
         },
         onError: () => {
           // Allow one-click retry by reconnecting or refreshing state.
@@ -201,7 +206,7 @@ function RegisterContent() {
         },
       }
     );
-  }, [address, hasAutoSignatureRequested, isConnected, isSigningMessage, mounted, router, signMessage]);
+  }, [address, hasAutoSignatureRequested, isConnected, isSigningMessage, mounted, promoCode, router, signMessage]);
 
   const handleEnableFastPay = useCallback(async (amount: number) => {
     if (!mounted) {
@@ -284,7 +289,7 @@ function RegisterContent() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col p-6 max-w-md mx-auto relative overflow-hidden">
       <Toaster />
-      
+
       <header className="py-12 flex flex-col items-center gap-4 text-center z-10">
         <div className="w-16 h-16 rounded-3xl bg-primary flex items-center justify-center shadow-xl shadow-primary/20">
           <UserPlus className="w-8 h-8 text-white" />
@@ -298,7 +303,7 @@ function RegisterContent() {
       <main className="flex-1 z-10">
         <AnimatePresence mode="wait">
           {step === 'form' ? (
-            <motion.div 
+            <motion.div
               key="form"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -314,20 +319,20 @@ function RegisterContent() {
                 <form onSubmit={handleRegister} className="space-y-4">
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Preferred Name</label>
-                    <Input 
-                      placeholder="e.g. Satoshi" 
+                    <Input
+                      placeholder="e.g. Satoshi"
                       className="h-14 rounded-2xl pl-6 border-slate-200 focus:ring-primary/20"
                       value={formData.username}
-                      onChange={(e) => setFormData({...formData, username: e.target.value})}
+                      onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                     />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Contact Info</label>
-                    <Input 
-                      placeholder="e.g. +1 234 567 890" 
+                    <Input
+                      placeholder="e.g. +1 234 567 890"
                       className="h-14 rounded-2xl pl-6 border-slate-200 focus:ring-primary/20"
                       value={formData.contact}
-                      onChange={(e) => setFormData({...formData, contact: e.target.value})}
+                      onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
                     />
                   </div>
 
@@ -339,7 +344,7 @@ function RegisterContent() {
               </div>
             </motion.div>
           ) : (
-            <motion.div 
+            <motion.div
               key="success"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -411,16 +416,15 @@ function RegisterContent() {
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Allowance Tiers</p>
                     <p className="text-[10px] font-black text-primary uppercase bg-primary/5 px-2 py-1 rounded-md">Bonus Discount</p>
                   </div>
-                  
+
                   <div className="grid grid-cols-3 gap-2">
                     {ALLOWANCE_TIERS.map((tier) => (
                       <button
                         key={tier.amount}
-                        className={`p-3 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all ${
-                          selectedAllowance === tier.amount 
-                          ? 'border-primary bg-primary/5 text-primary' 
-                          : 'border-slate-200 bg-white text-slate-400'
-                        }`}
+                        className={`p-3 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all ${selectedAllowance === tier.amount
+                            ? 'border-primary bg-primary/5 text-primary'
+                            : 'border-slate-200 bg-white text-slate-400'
+                          }`}
                         onClick={() => setSelectedAllowance(tier.amount)}
                         disabled={fastPayActive}
                       >
@@ -430,7 +434,7 @@ function RegisterContent() {
                     ))}
                   </div>
 
-                  <Button 
+                  <Button
                     variant={fastPayActive ? "default" : "outline"}
                     disabled={!mounted || isApproving || isConfirmingApprove || fastPayActive || isConnecting || isWalletClientLoading}
                     className={`w-full h-16 rounded-2xl font-black gap-3 transition-all ${fastPayActive ? 'bg-emerald-500 border-none' : 'border-primary/20 text-primary'}`}
