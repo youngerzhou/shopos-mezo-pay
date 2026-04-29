@@ -37,6 +37,11 @@ import { parseUnits, maxUint256 } from 'viem';
 import { mezoTestnet, MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app/lib/mezo-config';
 
 const MUSD_ADDRESS = MUSD_ADDRESSES.testnet;
+const ALLOWANCE_TIERS = [
+  { amount: 100, label: '$100', discount: '5%' },
+  { amount: 500, label: '$500', discount: '8%' },
+  { amount: 1000, label: '$1000+', discount: '10%' },
+] as const;
 
 export default function RegisterPage() {
   return (
@@ -65,6 +70,8 @@ function RegisterContent() {
   const [fastPayActive, setFastPayActive] = useState(false);
   const [selectedAllowance, setSelectedAllowance] = useState(100);
   const [pendingAllowanceAmount, setPendingAllowanceAmount] = useState<number | null>(null);
+  const [lastRequestedAllowanceAmount, setLastRequestedAllowanceAmount] = useState<number | null>(null);
+  const [authorizedAllowanceAmount, setAuthorizedAllowanceAmount] = useState<number | null>(null);
 
   const { address, isConnected, isConnecting, status } = useAccount();
   const { switchChain } = useSwitchChain();
@@ -103,6 +110,7 @@ function RegisterContent() {
 
     try {
       const amountUnits = amount === -1 ? maxUint256 : parseUnits(amount.toString(), 18);
+      setLastRequestedAllowanceAmount(amount);
 
       toast({
         title: "Opening Wallet...",
@@ -127,6 +135,7 @@ function RegisterContent() {
         args: [SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`, amountUnits],
       });
     } catch (err: any) {
+      setLastRequestedAllowanceAmount(null);
       toast({ variant: "destructive", title: "Approval Error", description: err.message });
     }
   }, [chainId, isWalletSessionReady, toast, writeContractAsync]);
@@ -145,12 +154,16 @@ function RegisterContent() {
   useEffect(() => {
     if (isApproveConfirmed) {
       setFastPayActive(true);
+      if (lastRequestedAllowanceAmount !== null) {
+        setAuthorizedAllowanceAmount(lastRequestedAllowanceAmount);
+      }
+      setLastRequestedAllowanceAmount(null);
       toast({
         title: "Fast Pay Authorized!",
         description: "Your allowance tier and bonus discount are now active.",
       });
     }
-  }, [isApproveConfirmed, toast]);
+  }, [isApproveConfirmed, lastRequestedAllowanceAmount, toast]);
 
   const handleEnableFastPay = useCallback(async (amount: number) => {
     if (!mounted) {
@@ -219,6 +232,8 @@ function RegisterContent() {
       setLoading(false);
     }
   };
+
+  const authorizedTier = ALLOWANCE_TIERS.find((tier) => tier.amount === authorizedAllowanceAmount);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col p-6 max-w-md mx-auto relative overflow-hidden">
@@ -329,11 +344,7 @@ function RegisterContent() {
                   </div>
                   
                   <div className="grid grid-cols-3 gap-2">
-                    {[
-                      { amount: 100, label: '$100', discount: '5%' },
-                      { amount: 500, label: '$500', discount: '8%' },
-                      { amount: 1000, label: '$1000+', discount: '10%' }
-                    ].map((tier) => (
+                    {ALLOWANCE_TIERS.map((tier) => (
                       <button
                         key={tier.amount}
                         className={`p-3 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all ${
@@ -365,6 +376,20 @@ function RegisterContent() {
                     )}
                     {fastPayActive ? 'Fast Pay Enabled' : (!mounted ? 'Loading Wallet...' : (isConnecting || isWalletClientLoading ? 'Checking Wallet...' : (pendingAllowanceAmount !== null ? 'Waking Wallet...' : (isApproving || isConfirmingApprove ? 'Authorizing...' : `Authorize Tiered Allowance`))))}
                   </Button>
+
+                  {fastPayActive && authorizedTier && (
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-center">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">
+                        Authorized Tier
+                      </p>
+                      <p className="mt-1 text-lg font-black text-emerald-900">
+                        {authorizedTier.label} Allowance
+                      </p>
+                      <p className="text-xs font-semibold text-emerald-700">
+                        Bonus Discount Active: {authorizedTier.discount} OFF
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <Button variant="outline" className="w-full h-16 rounded-2xl font-black gap-2 text-primary border-primary/20 bg-primary/5" onClick={() => window.location.href = '/'}>
