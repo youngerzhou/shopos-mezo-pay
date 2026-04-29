@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { 
   UserPlus, 
   Sparkles, 
@@ -29,6 +29,7 @@ import {
   useWriteContract, 
   useWaitForTransactionReceipt, 
   useAccount,
+  useSignMessage,
   useSwitchChain,
   useChainId
 } from 'wagmi';
@@ -52,6 +53,7 @@ export default function RegisterPage() {
 }
 
 function RegisterContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const staffPromoId = searchParams?.get('staff_promo');
   const { toast } = useToast();
@@ -73,6 +75,7 @@ function RegisterContent() {
   const [lastRequestedAllowanceAmount, setLastRequestedAllowanceAmount] = useState<number | null>(null);
   const [authorizedAllowanceAmount, setAuthorizedAllowanceAmount] = useState<number | null>(null);
   const [walletGuidance, setWalletGuidance] = useState<string>('');
+  const [hasAutoSignatureRequested, setHasAutoSignatureRequested] = useState(false);
 
   const { address, isConnected, isConnecting, status } = useAccount();
   const { switchChain } = useSwitchChain();
@@ -84,6 +87,7 @@ function RegisterContent() {
     data: approveHash, 
     isPending: isApproving, 
   } = useWriteContract();
+  const { signMessage, isPending: isSigningMessage } = useSignMessage();
 
   const { 
     isLoading: isConfirmingApprove, 
@@ -171,9 +175,33 @@ function RegisterContent() {
     if (status === 'disconnected') {
       setPendingAllowanceAmount(null);
       setLastRequestedAllowanceAmount(null);
+      setHasAutoSignatureRequested(false);
       setWalletGuidance('Wallet disconnected. Tap "Connect Wallet (Mobile Link)" and approve the connection in MetaMask.');
     }
   }, [status]);
+
+  useEffect(() => {
+    // Trigger one identity signature immediately after wallet connection.
+    if (!mounted || !isConnected || !address || hasAutoSignatureRequested || isSigningMessage) {
+      return;
+    }
+
+    setHasAutoSignatureRequested(true);
+    signMessage(
+      { message: 'Welcome to Mezo Pay! Please sign this to verify your identity.' },
+      {
+        onSuccess: () => {
+          setWalletGuidance('Signature verified. Redirecting to dashboard...');
+          router.push('/dashboard');
+        },
+        onError: () => {
+          // Allow one-click retry by reconnecting or refreshing state.
+          setHasAutoSignatureRequested(false);
+          setWalletGuidance('Signature was not completed. Re-open the wallet prompt and sign to continue.');
+        },
+      }
+    );
+  }, [address, hasAutoSignatureRequested, isConnected, isSigningMessage, mounted, router, signMessage]);
 
   const handleEnableFastPay = useCallback(async (amount: number) => {
     if (!mounted) {
