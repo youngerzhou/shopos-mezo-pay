@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import {
   UserPlus,
   Sparkles,
@@ -53,7 +53,6 @@ export default function RegisterPage() {
 }
 
 function RegisterContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const promoCode = searchParams?.get('promo');
   const staffPromoId = searchParams?.get('staff_promo');
@@ -194,9 +193,9 @@ function RegisterContent() {
         onSuccess: () => {
           setWalletGuidance('Signature verified. Redirecting...');
           if (promoCode) {
-            router.push(`/customer/membership-card?staffId=${promoCode}`);
+            window.location.href = `/customer/membership-card?staffId=${promoCode}`;
           } else {
-            router.push('/dashboard');
+            window.location.href = '/dashboard';
           }
         },
         onError: () => {
@@ -206,7 +205,7 @@ function RegisterContent() {
         },
       }
     );
-  }, [address, hasAutoSignatureRequested, isConnected, isSigningMessage, mounted, promoCode, router, signMessage]);
+  }, [address, hasAutoSignatureRequested, isConnected, isSigningMessage, mounted, promoCode, signMessage]);
 
   const handleEnableFastPay = useCallback(async (amount: number) => {
     if (!mounted) {
@@ -422,8 +421,8 @@ function RegisterContent() {
                       <button
                         key={tier.amount}
                         className={`p-3 rounded-2xl border-2 flex flex-col items-center gap-1 transition-all ${selectedAllowance === tier.amount
-                            ? 'border-primary bg-primary/5 text-primary'
-                            : 'border-slate-200 bg-white text-slate-400'
+                          ? 'border-primary bg-primary/5 text-primary'
+                          : 'border-slate-200 bg-white text-slate-400'
                           }`}
                         onClick={() => setSelectedAllowance(tier.amount)}
                         disabled={fastPayActive}
