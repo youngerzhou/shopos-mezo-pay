@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useCallback, useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { 
   UserPlus, 
@@ -25,6 +25,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeCanvas } from 'qrcode.react';
 
 import { 
+  useWalletClient,
   useWriteContract, 
   useWaitForTransactionReceipt, 
   useAccount,
@@ -51,6 +52,7 @@ function RegisterContent() {
   const staffPromoId = searchParams?.get('staff_promo');
   const { toast } = useToast();
   const { setOpen } = useModal();
+  const [mounted, setMounted] = useState(false);
 
   const [step, setStep] = useState<'form' | 'success'>('form');
   const [loading, setLoading] = useState(false);
@@ -65,12 +67,13 @@ function RegisterContent() {
   const [selectedAllowance, setSelectedAllowance] = useState(100);
   const [pendingAllowanceAmount, setPendingAllowanceAmount] = useState<number | null>(null);
 
-  const { address, isConnected, isConnecting } = useAccount();
+  const { address, isConnected, isConnecting, status } = useAccount();
   const { switchChain } = useSwitchChain();
   const chainId = useChainId();
+  const { data: walletClient, isLoading: isWalletClientLoading } = useWalletClient();
   
   const { 
-    writeContract, 
+    writeContractAsync, 
     data: approveHash, 
     isPending: isApproving, 
   } = useWriteContract();
@@ -82,39 +85,21 @@ function RegisterContent() {
     hash: approveHash,
   });
 
-  // Auto-trigger approval after connection or network switch
   useEffect(() => {
-    if (isConnected && chainId === mezoTestnet.id && pendingAllowanceAmount !== null) {
-      handleEnableFastPay(pendingAllowanceAmount);
-      setPendingAllowanceAmount(null);
-    }
-  }, [isConnected, chainId, pendingAllowanceAmount]);
+    setMounted(true);
+  }, []);
 
-  useEffect(() => {
-    if (isApproveConfirmed) {
-      setFastPayActive(true);
-      toast({
-        title: "Fast Pay Authorized!",
-        description: "Your allowance tier and bonus discount are now active.",
-      });
-    }
-  }, [isApproveConfirmed]);
+  const isWalletSessionReady =
+    mounted &&
+    status === 'connected' &&
+    isConnected &&
+    !!address &&
+    !!walletClient &&
+    !isWalletClientLoading;
 
-  const handleEnableFastPay = async (amount: number) => {
-    if (!isConnected) {
-      setPendingAllowanceAmount(amount);
-      setOpen(true);
+  const requestAllowanceApproval = useCallback(async (amount: number) => {
+    if (!isWalletSessionReady || chainId !== mezoTestnet.id) {
       return;
-    }
-
-    if (chainId !== mezoTestnet.id) {
-       toast({
-         title: "Switching Network",
-         description: "Please switch to Mezo Testnet in your wallet.",
-       });
-       setPendingAllowanceAmount(amount);
-       switchChain({ chainId: mezoTestnet.id });
-       return;
     }
 
     try {
@@ -125,7 +110,7 @@ function RegisterContent() {
         description: "Please confirm the allowance approval in your wallet app.",
       });
 
-      writeContract({
+      await writeContractAsync({
         address: MUSD_ADDRESS as `0x${string}`,
         abi: [
           {
@@ -144,9 +129,63 @@ function RegisterContent() {
       });
     } catch (err: any) {
       toast({ variant: "destructive", title: "Approval Error", description: err.message });
-      setPendingAllowanceAmount(null);
     }
-  };
+  }, [chainId, isWalletSessionReady, toast, writeContractAsync]);
+
+  // Resume the pending approval only after the wallet session is fully hydrated.
+  useEffect(() => {
+    if (pendingAllowanceAmount === null || !isWalletSessionReady || chainId !== mezoTestnet.id) {
+      return;
+    }
+
+    const amount = pendingAllowanceAmount;
+    setPendingAllowanceAmount(null);
+    void requestAllowanceApproval(amount);
+  }, [chainId, isWalletSessionReady, pendingAllowanceAmount, requestAllowanceApproval]);
+
+  useEffect(() => {
+    if (isApproveConfirmed) {
+      setFastPayActive(true);
+      toast({
+        title: "Fast Pay Authorized!",
+        description: "Your allowance tier and bonus discount are now active.",
+      });
+    }
+  }, [isApproveConfirmed, toast]);
+
+  const handleEnableFastPay = useCallback(async (amount: number) => {
+    if (!mounted) {
+      setPendingAllowanceAmount(amount);
+      return;
+    }
+
+    if (!isConnected) {
+      setPendingAllowanceAmount(amount);
+      setOpen(true);
+      return;
+    }
+
+    if (!isWalletSessionReady) {
+      setPendingAllowanceAmount(amount);
+      toast({
+        title: "Waiting for Wallet Session",
+        description: "Complete the wallet connection in MetaMask, then the approval request will open automatically.",
+      });
+      return;
+    }
+
+    if (chainId !== mezoTestnet.id) {
+      toast({
+        title: "Switching Network",
+        description: "Please switch to Mezo Testnet in your wallet.",
+      });
+      setPendingAllowanceAmount(amount);
+      switchChain({ chainId: mezoTestnet.id });
+      return;
+    }
+
+    await requestAllowanceApproval(amount);
+  }, [chainId, isConnected, isWalletSessionReady, mounted, requestAllowanceApproval, setOpen, switchChain, toast]);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -266,7 +305,7 @@ function RegisterContent() {
               </div>
 
               <div className="space-y-4">
-                {!isConnected && (
+                {mounted && !isConnected && (
                   <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 flex gap-3">
                     <Info className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                     <div>
@@ -279,7 +318,7 @@ function RegisterContent() {
                 <ConnectKitButton.Custom>
                   {({ isConnected, show, truncatedAddress, ensName }) => (
                     <Button onClick={show} variant="outline" className="w-full h-12 rounded-xl border-dashed border-primary/30 text-primary font-bold text-xs">
-                      {isConnected ? (ensName ?? truncatedAddress) : "Connect Wallet (Mobile Link)"}
+                      {mounted && isConnected ? (ensName ?? truncatedAddress) : "Connect Wallet (Mobile Link)"}
                     </Button>
                   )}
                 </ConnectKitButton.Custom>
@@ -314,18 +353,18 @@ function RegisterContent() {
 
                   <Button 
                     variant={fastPayActive ? "default" : "outline"}
-                    disabled={isApproving || isConfirmingApprove || fastPayActive || isConnecting || pendingAllowanceAmount !== null}
+                    disabled={!mounted || isApproving || isConfirmingApprove || fastPayActive || isConnecting || isWalletClientLoading || pendingAllowanceAmount !== null}
                     className={`w-full h-16 rounded-2xl font-black gap-3 transition-all ${fastPayActive ? 'bg-emerald-500 border-none' : 'border-primary/20 text-primary'}`}
                     onClick={() => handleEnableFastPay(selectedAllowance)}
                   >
-                    {isApproving || isConfirmingApprove || isConnecting || pendingAllowanceAmount !== null ? (
+                    {!mounted || isApproving || isConfirmingApprove || isConnecting || isWalletClientLoading || pendingAllowanceAmount !== null ? (
                       <RefreshCw className="w-5 h-5 animate-spin" />
                     ) : fastPayActive ? (
                       <ShieldCheck className="w-5 h-5" />
                     ) : (
                       <Zap className="w-5 h-5" />
                     )}
-                    {fastPayActive ? 'Fast Pay Enabled' : (isConnecting ? 'Checking Wallet...' : (pendingAllowanceAmount !== null ? 'Waking Wallet...' : (isApproving || isConfirmingApprove ? 'Authorizing...' : `Authorize Tiered Allowance`)))}
+                    {fastPayActive ? 'Fast Pay Enabled' : (!mounted ? 'Loading Wallet...' : (isConnecting || isWalletClientLoading ? 'Checking Wallet...' : (pendingAllowanceAmount !== null ? 'Waking Wallet...' : (isApproving || isConfirmingApprove ? 'Authorizing...' : `Authorize Tiered Allowance`))))}
                   </Button>
                 </div>
 

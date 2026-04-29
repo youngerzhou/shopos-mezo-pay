@@ -7,9 +7,15 @@ import { mezoTestnet } from '@/app/lib/mezo-chain';
 
 export { mezoTestnet };
 
+const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim();
+
+if (!walletConnectProjectId) {
+  throw new Error('Missing NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID for WalletConnect mobile deep-linking.');
+}
+
 const config = createConfig(
   getDefaultConfig({
-    walletConnectProjectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "3fd2994967399f666fca3b37a1e2f8f6",
+    walletConnectProjectId,
     appName: "ShopOS Mezo",
     chains: [mezoTestnet],
     transports: {
