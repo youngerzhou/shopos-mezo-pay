@@ -3,7 +3,7 @@
 import { WagmiProvider, createConfig, http } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ConnectKitProvider, getDefaultConfig } from 'connectkit';
-import { mezoTestnet } from '@/app/lib/mezo-chain';
+import { mezoTestnet } from '@/app/lib/mezo-config';
 
 export { mezoTestnet };
 

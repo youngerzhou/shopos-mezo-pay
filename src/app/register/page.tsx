@@ -34,10 +34,9 @@ import {
 } from 'wagmi';
 import { ConnectKitButton, useModal } from 'connectkit';
 import { parseUnits, maxUint256 } from 'viem';
-import { mezoTestnet } from '@/components/Web3Provider';
+import { mezoTestnet, MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app/lib/mezo-config';
 
-const MUSD_ADDRESS = '0x5Ab8E1C2A31a54728590c7E86749A50a6E1e450b';
-const SHOPOS_PULL_PAYMENT_CONTRACT = '0x489622dCC88cc10787A9A9A9A9A9A9A9A9A9A9A9';
+const MUSD_ADDRESS = MUSD_ADDRESSES.testnet;
 
 export default function RegisterPage() {
   return (

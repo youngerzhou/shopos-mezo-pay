@@ -12,7 +12,7 @@ import { parseUnits } from 'viem';
 import { roundMoney2 } from '@/app/lib/money';
 import { Button } from '@/components/ui/button';
 import { RefreshCw, CheckCircle2, AlertCircle, Wallet } from 'lucide-react';
-import { mezoTestnet } from '@/components/Web3Provider';
+import { mezoTestnet, MUSD_ADDRESSES } from '@/app/lib/mezo-config';
 import { useToast } from '@/hooks/use-toast';
 
 // Standard ERC20 ABI (transfer subset)
@@ -29,8 +29,7 @@ const erc20Abi = [
   },
 ] as const;
 
-// PLACEHOLDER: Update with real MUSD contract on Mezo Testnet
-const MUSD_ADDRESS = '0x5Ab8E1C2A31a54728590c7E86749A50a6E1e450b'; 
+const MUSD_ADDRESS = MUSD_ADDRESSES.testnet;
 
 interface ContractInteractionProps {
   orderId: string;

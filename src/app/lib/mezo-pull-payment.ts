@@ -1,8 +1,7 @@
 import { createPublicClient, http } from 'viem';
-import { mezoTestnet } from '@/app/lib/mezo-chain';
+import { mezoTestnet, MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app/lib/mezo-config';
 
-const MUSD_ADDRESS = '0x5Ab8E1C2A31a54728590c7E86749A50a6E1e450b';
-const SHOPOS_PULL_PAYMENT_CONTRACT = '0x489622dCC88cc10787A9A9A9A9A9A9A9A9A9A9A9';
+const MUSD_ADDRESS = MUSD_ADDRESSES.testnet;
 
 export const ALLOWANCE_TIERS = [
   { amount: 100, discount: 0.05, label: 'Silver' },
