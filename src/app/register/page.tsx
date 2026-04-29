@@ -250,6 +250,8 @@ function RegisterContent() {
   };
 
   const authorizedTier = ALLOWANCE_TIERS.find((tier) => tier.amount === authorizedAllowanceAmount);
+  const shortAddress = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '';
+  const isWrongNetwork = mounted && isConnected && chainId !== mezoTestnet.id;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col p-6 max-w-md mx-auto relative overflow-hidden">
@@ -345,13 +347,36 @@ function RegisterContent() {
                   </div>
                 )}
 
-                <ConnectKitButton.Custom>
-                  {({ isConnected, show, truncatedAddress, ensName }) => (
-                    <Button onClick={show} variant="outline" className="w-full h-12 rounded-xl border-dashed border-primary/30 text-primary font-bold text-xs">
-                      {mounted && isConnected ? (ensName ?? truncatedAddress) : "Connect Wallet (Mobile Link)"}
-                    </Button>
-                  )}
-                </ConnectKitButton.Custom>
+                {!mounted ? (
+                  <div className="h-12 w-full animate-pulse rounded-xl border border-slate-200 bg-slate-100" />
+                ) : isConnected && address ? (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">
+                      Wallet Connected
+                    </p>
+                    <p className="mt-1 text-sm font-bold text-emerald-900">
+                      Wallet Connected: <span className="font-mono">{shortAddress}</span>
+                    </p>
+                  </div>
+                ) : (
+                  <ConnectKitButton.Custom>
+                    {({ show }) => (
+                      <Button onClick={show} variant="outline" className="w-full h-12 rounded-xl border-dashed border-primary/30 text-primary font-bold text-xs">
+                        Connect Wallet (Mobile Link)
+                      </Button>
+                    )}
+                  </ConnectKitButton.Custom>
+                )}
+
+                {isWrongNetwork && (
+                  <Button
+                    variant="destructive"
+                    className="w-full h-12 rounded-xl font-black text-xs"
+                    onClick={() => switchChain({ chainId: mezoTestnet.id })}
+                  >
+                    Switch to Mezo Testnet
+                  </Button>
+                )}
 
                 <div className="bg-white p-6 rounded-[2rem] border border-slate-200 space-y-4">
                   <div className="flex justify-between items-center">
