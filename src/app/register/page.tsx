@@ -72,6 +72,7 @@ function RegisterContent() {
   const [pendingAllowanceAmount, setPendingAllowanceAmount] = useState<number | null>(null);
   const [lastRequestedAllowanceAmount, setLastRequestedAllowanceAmount] = useState<number | null>(null);
   const [authorizedAllowanceAmount, setAuthorizedAllowanceAmount] = useState<number | null>(null);
+  const [walletGuidance, setWalletGuidance] = useState<string>('');
 
   const { address, isConnected, isConnecting, status } = useAccount();
   const { switchChain } = useSwitchChain();
@@ -165,20 +166,33 @@ function RegisterContent() {
     }
   }, [isApproveConfirmed, lastRequestedAllowanceAmount, toast]);
 
+  useEffect(() => {
+    // If wallet connection was not completed, do not keep the UI locked.
+    if (status === 'disconnected') {
+      setPendingAllowanceAmount(null);
+      setLastRequestedAllowanceAmount(null);
+      setWalletGuidance('Wallet disconnected. Tap "Connect Wallet (Mobile Link)" and approve the connection in MetaMask.');
+    }
+  }, [status]);
+
   const handleEnableFastPay = useCallback(async (amount: number) => {
     if (!mounted) {
       setPendingAllowanceAmount(amount);
+      setWalletGuidance('Preparing wallet module... please wait a moment and tap authorize again.');
       return;
     }
 
     if (!isConnected) {
       setPendingAllowanceAmount(amount);
+      setWalletGuidance('No wallet connected. Tap "Connect Wallet (Mobile Link)" and confirm in MetaMask.');
       setOpen(true);
       return;
     }
 
     if (!isWalletSessionReady) {
       setPendingAllowanceAmount(amount);
+      setWalletGuidance('Wallet app opened, but session is not ready yet. Complete connection in MetaMask and return here.');
+      setOpen(true);
       toast({
         title: "Waiting for Wallet Session",
         description: "Complete the wallet connection in MetaMask, then the approval request will open automatically.",
@@ -187,6 +201,7 @@ function RegisterContent() {
     }
 
     if (chainId !== mezoTestnet.id) {
+      setWalletGuidance('Wrong network detected. Please approve network switch to Mezo Testnet in your wallet.');
       toast({
         title: "Switching Network",
         description: "Please switch to Mezo Testnet in your wallet.",
@@ -196,6 +211,7 @@ function RegisterContent() {
       return;
     }
 
+    setWalletGuidance('Approval request sent. Check MetaMask for the transaction confirmation prompt.');
     await requestAllowanceApproval(amount);
   }, [chainId, isConnected, isWalletSessionReady, mounted, requestAllowanceApproval, setOpen, switchChain, toast]);
 
@@ -363,19 +379,33 @@ function RegisterContent() {
 
                   <Button 
                     variant={fastPayActive ? "default" : "outline"}
-                    disabled={!mounted || isApproving || isConfirmingApprove || fastPayActive || isConnecting || isWalletClientLoading || pendingAllowanceAmount !== null}
+                    disabled={!mounted || isApproving || isConfirmingApprove || fastPayActive || isConnecting || isWalletClientLoading}
                     className={`w-full h-16 rounded-2xl font-black gap-3 transition-all ${fastPayActive ? 'bg-emerald-500 border-none' : 'border-primary/20 text-primary'}`}
                     onClick={() => handleEnableFastPay(selectedAllowance)}
                   >
-                    {!mounted || isApproving || isConfirmingApprove || isConnecting || isWalletClientLoading || pendingAllowanceAmount !== null ? (
+                    {!mounted || isApproving || isConfirmingApprove || isConnecting || isWalletClientLoading ? (
                       <RefreshCw className="w-5 h-5 animate-spin" />
                     ) : fastPayActive ? (
                       <ShieldCheck className="w-5 h-5" />
                     ) : (
                       <Zap className="w-5 h-5" />
                     )}
-                    {fastPayActive ? 'Fast Pay Enabled' : (!mounted ? 'Loading Wallet...' : (isConnecting || isWalletClientLoading ? 'Checking Wallet...' : (pendingAllowanceAmount !== null ? 'Waking Wallet...' : (isApproving || isConfirmingApprove ? 'Authorizing...' : `Authorize Tiered Allowance`))))}
+                    {fastPayActive ? 'Fast Pay Enabled' : (!mounted ? 'Loading Wallet...' : (isConnecting || isWalletClientLoading ? 'Checking Wallet...' : (isApproving || isConfirmingApprove ? 'Authorizing...' : `Authorize Tiered Allowance`)))}
                   </Button>
+
+                  {!fastPayActive && walletGuidance && (
+                    <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-blue-700">
+                        Wallet Guidance
+                      </p>
+                      <p className="mt-1 text-xs font-medium leading-relaxed text-blue-800">
+                        {walletGuidance}
+                      </p>
+                      <p className="mt-2 text-[11px] leading-relaxed text-blue-700/90">
+                        If no wallet popup appears, open this page directly inside the MetaMask in-app browser and try again.
+                      </p>
+                    </div>
+                  )}
 
                   {fastPayActive && authorizedTier && (
                     <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-center">
