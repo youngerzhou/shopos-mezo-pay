@@ -38,6 +38,8 @@ export const SCHEMA_DEFINITION = {
     referred_by_staff_id: "TEXT", // Added to track staff referrals
     level: "INTEGER DEFAULT 1",
     fast_pay_enabled: "BOOLEAN DEFAULT FALSE",
+    identity_verified: "BOOLEAN DEFAULT FALSE", // Track blockchain identity verification
+    verified_at: "TIMESTAMP", // When identity was verified
     created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
   },
   staff: {

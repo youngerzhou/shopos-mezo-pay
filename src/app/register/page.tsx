@@ -101,6 +101,13 @@ function RegisterContent() {
     setMounted(true);
   }, []);
 
+  // Check identity verification status when member data is available
+  useEffect(() => {
+    if (newMember?.referral_id && step === 'success') {
+      checkIdentityVerification(newMember.referral_id);
+    }
+  }, [newMember, step]);
+
   const isWalletSessionReady =
     mounted &&
     status === 'connected' &&
@@ -108,6 +115,33 @@ function RegisterContent() {
     !!address &&
     !!walletClient &&
     !isWalletClientLoading;
+
+  const checkIdentityVerification = async (referralId: string) => {
+    try {
+      const res = await fetch(`/api/customers/verify?referral_id=${referralId}`);
+      const data = await res.json();
+      if (data.identity_verified) {
+        setIdentityVerified(true);
+      }
+    } catch (err) {
+      console.error('Failed to check identity verification:', err);
+    }
+  };
+
+  const updateIdentityVerification = async (referralId: string) => {
+    try {
+      const res = await fetch('/api/customers/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referral_id: referralId }),
+      });
+      if (!res.ok) {
+        console.error('Failed to update identity verification');
+      }
+    } catch (err) {
+      console.error('Failed to update identity verification:', err);
+    }
+  };
 
   const requestAllowanceApproval = useCallback(async (amount: number) => {
     if (!isWalletSessionReady || chainId !== mezoTestnet.id) {
@@ -482,6 +516,9 @@ function RegisterContent() {
                         onSuccess: () => {
                           setWalletGuidance('Identity verified successfully!');
                           setIdentityVerified(true);
+                          if (newMember?.referral_id) {
+                            updateIdentityVerification(newMember.referral_id);
+                          }
                         },
                         onError: () => {
                           setHasAutoSignatureRequested(false);
