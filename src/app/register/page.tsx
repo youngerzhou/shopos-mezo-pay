@@ -123,8 +123,31 @@ function RegisterContent() {
       if (data.identity_verified) {
         setIdentityVerified(true);
       }
+      if (data.fast_pay_enabled) {
+        setFastPayActive(true);
+        setAuthorizedAllowanceAmount(data.fast_pay_allowance);
+      }
     } catch (err) {
       console.error('Failed to check identity verification:', err);
+    }
+  };
+
+  const updateFastPayAuthorization = async (referralId: string, allowanceAmount: number) => {
+    try {
+      const res = await fetch('/api/customers/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          referral_id: referralId,
+          action: 'enable_fast_pay',
+          allowance_amount: allowanceAmount
+        }),
+      });
+      if (!res.ok) {
+        console.error('Failed to update fast pay authorization');
+      }
+    } catch (err) {
+      console.error('Failed to update fast pay authorization:', err);
     }
   };
 
@@ -133,7 +156,10 @@ function RegisterContent() {
       const res = await fetch('/api/customers/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ referral_id: referralId }),
+        body: JSON.stringify({
+          referral_id: referralId,
+          action: 'verify_identity'
+        }),
       });
       if (!res.ok) {
         console.error('Failed to update identity verification');
@@ -196,6 +222,10 @@ function RegisterContent() {
       setFastPayActive(true);
       if (lastRequestedAllowanceAmount !== null) {
         setAuthorizedAllowanceAmount(lastRequestedAllowanceAmount);
+        // Update database with fast pay authorization
+        if (newMember?.referral_id) {
+          updateFastPayAuthorization(newMember.referral_id, lastRequestedAllowanceAmount);
+        }
       }
       setLastRequestedAllowanceAmount(null);
       toast({
@@ -203,7 +233,7 @@ function RegisterContent() {
         description: "Your allowance tier and bonus discount are now active.",
       });
     }
-  }, [isApproveConfirmed, lastRequestedAllowanceAmount, toast]);
+  }, [isApproveConfirmed, lastRequestedAllowanceAmount, newMember, toast]);
 
   useEffect(() => {
     // Wallet connection status changes - no auto signature
