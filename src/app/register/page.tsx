@@ -468,11 +468,7 @@ function RegisterContent() {
                       {
                         onSuccess: () => {
                           setWalletGuidance('Signature verified. Redirecting...');
-                          if (promoCode) {
-                            window.location.href = `/customer/membership-card?staffId=${promoCode}`;
-                          } else {
-                            window.location.href = '/dashboard';
-                          }
+                          window.location.href = '/';
                         },
                         onError: () => {
                           setHasAutoSignatureRequested(false);
