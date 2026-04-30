@@ -105,7 +105,8 @@ function MembershipCardContent() {
                                     </div>
                                     <div>
                                         <p className="text-[10px] uppercase tracking-[0.32em] text-slate-400 font-black">Authorized Amount</p>
-                                        <p className="mt-2 text-xl font-black text-slate-900">{member.fast_pay_allowance ? `${member.fast_pay_allowance} MUSD` : 'None'}</p>
+                                        <p className="mt-2 text-xl font-black text-slate-900">{member.fast_pay_allowance != null ? `${member.fast_pay_allowance} MUSD` : 'None'}</p>
+                                        <p className="mt-2 text-xs text-slate-500">This is the exact amount you approved for fast-pay transactions.</p>
                                     </div>
                                 </div>
                             </div>

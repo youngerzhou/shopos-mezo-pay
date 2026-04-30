@@ -134,13 +134,19 @@ function RegisterContent() {
 
   const updateFastPayAuthorization = async (referralId: string, allowanceAmount: number) => {
     try {
+      const parsedAllowance = Number(allowanceAmount);
+      if (Number.isNaN(parsedAllowance)) {
+        console.error('Invalid allowance amount for fast pay authorization');
+        return;
+      }
+
       const res = await fetch('/api/customers/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           referral_id: referralId,
           action: 'enable_fast_pay',
-          allowance_amount: allowanceAmount
+          allowance_amount: parsedAllowance
         }),
       });
       if (!res.ok) {
@@ -174,13 +180,16 @@ function RegisterContent() {
       return;
     }
 
+    const amountLabel = amount === -1 ? 'Unlimited MUSD' : `${amount} MUSD`;
+    setLastRequestedAllowanceAmount(amount);
+    setWalletGuidance(`Confirm approval for ${amountLabel} in your wallet. This authorizes the ShopOS Mezo contract to spend up to this amount for Fast Pay.`);
+
     try {
       const amountUnits = amount === -1 ? maxUint256 : parseUnits(amount.toString(), 18);
-      setLastRequestedAllowanceAmount(amount);
 
       toast({
         title: "Opening Wallet...",
-        description: "Please confirm the allowance approval in your wallet app.",
+        description: `Please confirm approval for ${amountLabel} in MetaMask.`,
       });
 
       await writeContractAsync({
@@ -227,10 +236,11 @@ function RegisterContent() {
           updateFastPayAuthorization(newMember.referral_id, lastRequestedAllowanceAmount);
         }
       }
+      const amountLabel = lastRequestedAllowanceAmount === -1 ? 'Unlimited' : `${lastRequestedAllowanceAmount} MUSD`;
       setLastRequestedAllowanceAmount(null);
       toast({
         title: "Fast Pay Authorized!",
-        description: "Your allowance tier and bonus discount are now active.",
+        description: `Your wallet approval for ${amountLabel} is now active.`,
       });
     }
   }, [isApproveConfirmed, lastRequestedAllowanceAmount, newMember, toast]);
@@ -530,6 +540,8 @@ function RegisterContent() {
                     ))}
                   </div>
 
+                  <p className="text-xs text-slate-500">You are authorizing {selectedAllowance} MUSD for fast-pay. MetaMask will ask you to confirm this exact amount.</p>
+
                   <Button
                     variant={fastPayActive ? "default" : "outline"}
                     disabled={!mounted || isApproving || isConfirmingApprove || fastPayActive || isConnecting || isWalletClientLoading}
@@ -560,17 +572,23 @@ function RegisterContent() {
                     </div>
                   )}
 
-                  {fastPayActive && authorizedTier && (
+                  {fastPayActive && authorizedAllowanceAmount != null && (
                     <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-center">
                       <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">
-                        Authorized Tier
+                        Authorized Allowance
                       </p>
                       <p className="mt-1 text-lg font-black text-emerald-900">
-                        {authorizedTier.label} Allowance
+                        {authorizedAllowanceAmount} MUSD
                       </p>
-                      <p className="text-xs font-semibold text-emerald-700">
-                        Bonus Discount Active: {authorizedTier.discount} OFF
-                      </p>
+                      {authorizedTier ? (
+                        <p className="text-xs font-semibold text-emerald-700">
+                          Bonus Discount Active: {authorizedTier.discount} OFF
+                        </p>
+                      ) : (
+                        <p className="text-xs font-semibold text-emerald-700">
+                          Your exact approved amount is stored here.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
