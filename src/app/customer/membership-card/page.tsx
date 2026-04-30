@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { RefreshCw, CheckCircle2, Info, ShieldCheck } from 'lucide-react';
 import { Toaster } from '@/components/ui/toaster';
 
-export default function MembershipCardPage() {
+function MembershipCardContent() {
   const searchParams = useSearchParams();
   const referralId = searchParams?.get('referral_id') || searchParams?.get('referralId');
   const [member, setMember] = useState<any>(null);
@@ -114,5 +114,24 @@ export default function MembershipCardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function MembershipCardPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-slate-50 p-6 flex flex-col items-center">
+        <div className="w-full max-w-xl">
+          <div className="rounded-[3rem] bg-white shadow-2xl border border-slate-200 p-8">
+            <div className="flex flex-col items-center justify-center gap-4 py-20">
+              <RefreshCw className="w-10 h-10 animate-spin text-primary" />
+              <p className="text-sm font-black text-slate-500 uppercase">Loading membership details...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    }>
+      <MembershipCardContent />
+    </Suspense>
   );
 }
