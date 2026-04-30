@@ -171,7 +171,7 @@ function RegisterContent() {
   }, [isApproveConfirmed, lastRequestedAllowanceAmount, toast]);
 
   useEffect(() => {
-    // If wallet connection was not completed, do not keep the UI locked.
+    // Wallet connection status changes - no auto signature
     if (status === 'disconnected') {
       setPendingAllowanceAmount(null);
       setLastRequestedAllowanceAmount(null);
@@ -179,33 +179,6 @@ function RegisterContent() {
       setWalletGuidance('Wallet disconnected. Tap "Connect Wallet (Mobile Link)" and approve the connection in MetaMask.');
     }
   }, [status]);
-
-  useEffect(() => {
-    // Trigger one identity signature immediately after wallet connection.
-    if (!mounted || !isConnected || !address || hasAutoSignatureRequested || isSigningMessage) {
-      return;
-    }
-
-    setHasAutoSignatureRequested(true);
-    signMessage(
-      { message: 'Welcome to Mezo Pay! Please sign this to verify your identity.' },
-      {
-        onSuccess: () => {
-          setWalletGuidance('Signature verified. Redirecting...');
-          if (promoCode) {
-            window.location.href = `/customer/membership-card?staffId=${promoCode}`;
-          } else {
-            window.location.href = '/dashboard';
-          }
-        },
-        onError: () => {
-          // Allow one-click retry by reconnecting or refreshing state.
-          setHasAutoSignatureRequested(false);
-          setWalletGuidance('Signature was not completed. Re-open the wallet prompt and sign to continue.');
-        },
-      }
-    );
-  }, [address, hasAutoSignatureRequested, isConnected, isSigningMessage, mounted, promoCode, signMessage]);
 
   const handleEnableFastPay = useCallback(async (amount: number) => {
     if (!mounted) {
@@ -477,6 +450,50 @@ function RegisterContent() {
                     </div>
                   )}
                 </div>
+
+                <Button
+                  variant="default"
+                  disabled={!mounted || !isConnected || isSigningMessage}
+                  className="w-full h-16 rounded-2xl font-black gap-2 bg-secondary text-primary shadow-xl shadow-secondary/20 hover:scale-[1.02] transition-transform"
+                  onClick={() => {
+                    if (!isConnected) {
+                      setWalletGuidance('Please connect your wallet first.');
+                      setOpen(true);
+                      return;
+                    }
+
+                    setHasAutoSignatureRequested(true);
+                    signMessage(
+                      { message: 'Welcome to Mezo Pay! Please sign this to verify your identity.' },
+                      {
+                        onSuccess: () => {
+                          setWalletGuidance('Signature verified. Redirecting...');
+                          if (promoCode) {
+                            window.location.href = `/customer/membership-card?staffId=${promoCode}`;
+                          } else {
+                            window.location.href = '/dashboard';
+                          }
+                        },
+                        onError: () => {
+                          setHasAutoSignatureRequested(false);
+                          setWalletGuidance('Signature was not completed. Please try again.');
+                        },
+                      }
+                    );
+                  }}
+                >
+                  {isSigningMessage ? (
+                    <>
+                      <RefreshCw className="w-5 h-5 animate-spin" />
+                      Signing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-5 h-5" />
+                      Verify Identity & Continue
+                    </>
+                  )}
+                </Button>
 
                 <Button variant="outline" className="w-full h-16 rounded-2xl font-black gap-2 text-primary border-primary/20 bg-primary/5" onClick={() => window.location.href = '/'}>
                   Start Shopping
