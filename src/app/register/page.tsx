@@ -285,6 +285,30 @@ function RegisterContent() {
     await requestAllowanceApproval(amount);
   }, [chainId, isConnected, isWalletSessionReady, mounted, requestAllowanceApproval, setOpen, switchChain, toast]);
 
+  const lookupExistingMember = async (contact: string) => {
+    if (!contact) return false;
+    setLookingUp(true);
+    try {
+      const res = await fetch(`/api/register?lookup=${encodeURIComponent(contact)}`);
+      const data = await res.json();
+      if (res.ok && data && data.referral_id) {
+        setNewMember(data);
+        setStep('success');
+        setFormData({ username: data.username || '', contact });
+        setIdentityVerified(!!data.identity_verified);
+        setFastPayActive(!!data.fast_pay_enabled);
+        setAuthorizedAllowanceAmount(data.fast_pay_allowance ?? null);
+        toast({ title: "Existing member detected", description: "Loaded your original membership record." });
+        return true;
+      }
+    } catch (err) {
+      console.error('Member lookup failed:', err);
+    } finally {
+      setLookingUp(false);
+    }
+    return false;
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.username || !formData.contact) {
@@ -294,12 +318,18 @@ function RegisterContent() {
 
     setLoading(true);
     try {
+      const lookupContact = formData.contact.trim();
+      const alreadyMember = await lookupExistingMember(lookupContact);
+      if (alreadyMember) {
+        return;
+      }
+
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: formData.username.trim(),
-          contact: formData.contact.trim(),
+          contact: lookupContact,
           staff_id: staffPromoId
         })
       });
@@ -308,6 +338,9 @@ function RegisterContent() {
       if (res.ok && data && data.referral_id) {
         setNewMember(data);
         setStep('success');
+        setIdentityVerified(!!data.identity_verified);
+        setFastPayActive(!!data.fast_pay_enabled);
+        setAuthorizedAllowanceAmount(data.fast_pay_allowance ?? null);
         toast({ title: "Welcome!", description: "Your member profile is ready." });
       } else {
         throw new Error(data.error || 'Registration failed');
@@ -370,7 +403,11 @@ function RegisterContent() {
                       className="h-14 rounded-2xl pl-6 border-slate-200 focus:ring-primary/20"
                       value={formData.contact}
                       onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
+                      onBlur={() => lookupExistingMember(formData.contact.trim())}
                     />
+                    {lookingUp && (
+                      <p className="text-xs text-slate-500 mt-1">Checking existing membership for this phone number...</p>
+                    )}
                   </div>
 
                   <Button type="submit" disabled={loading} className="w-full h-16 rounded-2xl font-black text-lg shadow-xl shadow-primary/20 gap-2 mt-4">
@@ -416,6 +453,16 @@ function RegisterContent() {
                   </div>
                   <p className="text-emerald-200 text-xs font-medium">Your membership is now fully activated with blockchain verification.</p>
                 </div>
+              )}
+
+              {newMember?.referral_id && (
+                <Button
+                  variant="outline"
+                  className="w-full h-16 rounded-2xl font-black gap-2 text-primary border-primary/20 bg-primary/5"
+                  onClick={() => window.location.href = `/customer/membership-card?referral_id=${newMember.referral_id}`}
+                >
+                  View Membership Card
+                </Button>
               )}
 
               <div className="space-y-4">

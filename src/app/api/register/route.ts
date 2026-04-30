@@ -15,6 +15,12 @@ export async function POST(req: NextRequest) {
     await ensureDb();
     const sql = getSql();
 
+    // If this contact already exists, return the existing member instead of creating a duplicate.
+    const existingCustomer = await sql`SELECT * FROM customers WHERE contact_info = ${contact} LIMIT 1`;
+    if (existingCustomer.length > 0) {
+      return NextResponse.json(existingCustomer[0]);
+    }
+
     // Generate unique MEM_ ID
     const referral_id = `MEM_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     const id = Math.random().toString(36).substring(7);
