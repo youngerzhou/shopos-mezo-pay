@@ -76,6 +76,7 @@ function RegisterContent() {
   const [authorizedAllowanceAmount, setAuthorizedAllowanceAmount] = useState<number | null>(null);
   const [walletGuidance, setWalletGuidance] = useState<string>('');
   const [hasAutoSignatureRequested, setHasAutoSignatureRequested] = useState(false);
+  const [identityVerified, setIdentityVerified] = useState(false);
 
   const { address, isConnected, isConnecting, status } = useAccount();
   const { switchChain } = useSwitchChain();
@@ -341,6 +342,18 @@ function RegisterContent() {
                 </div>
               </div>
 
+              {identityVerified && (
+                <div className="w-full bg-emerald-900 rounded-[2rem] text-white shadow-xl overflow-hidden border border-emerald-700/50 p-6 text-center">
+                  <div className="flex items-center justify-center gap-3 mb-2">
+                    <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center">
+                      <ShieldCheck className="w-4 h-4 text-white" />
+                    </div>
+                    <h3 className="text-lg font-black tracking-tight">Identity Verified</h3>
+                  </div>
+                  <p className="text-emerald-200 text-xs font-medium">Your membership is now fully activated with blockchain verification.</p>
+                </div>
+              )}
+
               <div className="space-y-4">
                 {mounted && !isConnected && (
                   <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 flex gap-3">
@@ -467,8 +480,8 @@ function RegisterContent() {
                       { message: 'Welcome to Mezo Pay! Please sign this to verify your identity.' },
                       {
                         onSuccess: () => {
-                          setWalletGuidance('Signature verified. Redirecting...');
-                          window.location.href = '/';
+                          setWalletGuidance('Identity verified successfully!');
+                          setIdentityVerified(true);
                         },
                         onError: () => {
                           setHasAutoSignatureRequested(false);
@@ -491,9 +504,22 @@ function RegisterContent() {
                   )}
                 </Button>
 
-                <Button variant="outline" className="w-full h-16 rounded-2xl font-black gap-2 text-primary border-primary/20 bg-primary/5" onClick={() => window.location.href = '/'}>
-                  Start Shopping
-                  <ArrowRight className="w-4 h-4" />
+                <Button
+                  variant={identityVerified ? "default" : "outline"}
+                  className={`w-full h-16 rounded-2xl font-black gap-2 ${identityVerified ? 'bg-emerald-500 border-none text-white shadow-lg' : 'text-primary border-primary/20 bg-primary/5'}`}
+                  onClick={() => window.location.href = '/'}
+                >
+                  {identityVerified ? (
+                    <>
+                      <Sparkles className="w-5 h-5" />
+                      Continue to POS
+                    </>
+                  ) : (
+                    <>
+                      Start Shopping
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
                 </Button>
               </div>
             </motion.div>
