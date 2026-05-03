@@ -8,9 +8,14 @@ import { mezoTestnet } from '@/app/lib/mezo-config';
 export { mezoTestnet };
 
 const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim();
+const sepoliaRpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim();
 
 if (!walletConnectProjectId) {
   throw new Error('Missing NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID for WalletConnect mobile deep-linking.');
+}
+
+if (!sepoliaRpcUrl) {
+  throw new Error('Missing NEXT_PUBLIC_SEPOLIA_RPC_URL for Sepolia / Mezo RPC transport.');
 }
 
 const config = createConfig(
@@ -19,7 +24,7 @@ const config = createConfig(
     appName: "ShopOS Mezo",
     chains: [mezoTestnet],
     transports: {
-      [mezoTestnet.id]: http(),
+      [mezoTestnet.id]: http({ url: sepoliaRpcUrl }),
     },
   })
 );

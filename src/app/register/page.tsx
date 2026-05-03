@@ -76,6 +76,8 @@ function RegisterContent() {
   const [authorizedAllowanceAmount, setAuthorizedAllowanceAmount] = useState<number | null>(null);
   const [walletGuidance, setWalletGuidance] = useState<string>('');
   const [hasAutoSignatureRequested, setHasAutoSignatureRequested] = useState(false);
+  const [pendingSignatureRequest, setPendingSignatureRequest] = useState(false);
+  const [signatureRequestError, setSignatureRequestError] = useState<string | null>(null);
   const [identityVerified, setIdentityVerified] = useState(false);
 
   const { address, isConnected, isConnecting, status } = useAccount();
@@ -115,6 +117,69 @@ function RegisterContent() {
     !!address &&
     !!walletClient &&
     !isWalletClientLoading;
+
+  const handleSignatureError = useCallback((err: any) => {
+    setHasAutoSignatureRequested(false);
+    setPendingSignatureRequest(false);
+
+    const isUserRejected =
+      err?.code === 4001 ||
+      err?.message?.toString().toLowerCase().includes('user rejected');
+
+    if (isUserRejected) {
+      setWalletGuidance('Signature request was rejected. Tap Verify again when you are ready.');
+      setSignatureRequestError('User rejected request');
+      toast({
+        variant: 'destructive',
+        title: 'Signature Rejected',
+        description: 'You rejected the wallet signature request. Please try again when ready.',
+      });
+      return;
+    }
+
+    const fallbackMessage = err?.message ?? 'Unable to complete signature request.';
+    setWalletGuidance('Signature failed. Please try again or reopen the wallet.');
+    setSignatureRequestError(fallbackMessage);
+    toast({
+      variant: 'destructive',
+      title: 'Signature Error',
+      description: fallbackMessage,
+    });
+  }, [toast]);
+
+  useEffect(() => {
+    if (!pendingSignatureRequest) {
+      return;
+    }
+    if (status !== 'connected' || !isWalletSessionReady) {
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      try {
+        await signMessage(
+          { message: 'Welcome to Mezo Pay! Please sign this to verify your identity.' },
+          {
+            onSuccess: () => {
+              setHasAutoSignatureRequested(false);
+              setPendingSignatureRequest(false);
+              setSignatureRequestError(null);
+              setWalletGuidance('Identity verified successfully!');
+              setIdentityVerified(true);
+              if (newMember?.referral_id) {
+                updateIdentityVerification(newMember.referral_id);
+              }
+            },
+            onError: handleSignatureError,
+          }
+        );
+      } catch (err: any) {
+        handleSignatureError(err);
+      }
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [pendingSignatureRequest, status, isWalletSessionReady, signMessage, handleSignatureError, newMember]);
 
   const checkIdentityVerification = async (referralId: string) => {
     try {
@@ -251,6 +316,7 @@ function RegisterContent() {
       setPendingAllowanceAmount(null);
       setLastRequestedAllowanceAmount(null);
       setHasAutoSignatureRequested(false);
+      setPendingSignatureRequest(false);
       setWalletGuidance('Wallet disconnected. Tap "Connect Wallet (Mobile Link)" and approve the connection in MetaMask.');
     }
   }, [status]);
@@ -595,32 +661,25 @@ function RegisterContent() {
 
                 <Button
                   variant="default"
-                  disabled={!mounted || !isConnected || isSigningMessage}
+                  disabled={!mounted || !isConnected || !status || status !== 'connected' || isSigningMessage || pendingSignatureRequest}
                   className="w-full h-16 rounded-2xl font-black gap-2 bg-secondary text-primary shadow-xl shadow-secondary/20 hover:scale-[1.02] transition-transform"
                   onClick={() => {
-                    if (!isConnected) {
-                      setWalletGuidance('Please connect your wallet first.');
+                    if (!status || status !== 'connected' || !isConnected) {
+                      setWalletGuidance('Please connect your wallet first and confirm the connection in MetaMask.');
                       setOpen(true);
                       return;
                     }
 
+                    if (!isWalletSessionReady) {
+                      setHasAutoSignatureRequested(true);
+                      setPendingSignatureRequest(true);
+                      setWalletGuidance('Waiting for the wallet session to finish initializing. The signature request will open in MetaMask shortly.');
+                      return;
+                    }
+
                     setHasAutoSignatureRequested(true);
-                    signMessage(
-                      { message: 'Welcome to Mezo Pay! Please sign this to verify your identity.' },
-                      {
-                        onSuccess: () => {
-                          setWalletGuidance('Identity verified successfully!');
-                          setIdentityVerified(true);
-                          if (newMember?.referral_id) {
-                            updateIdentityVerification(newMember.referral_id);
-                          }
-                        },
-                        onError: () => {
-                          setHasAutoSignatureRequested(false);
-                          setWalletGuidance('Signature was not completed. Please try again.');
-                        },
-                      }
-                    );
+                    setPendingSignatureRequest(true);
+                    setWalletGuidance('Opening the signature request in MetaMask. Please approve it there.');
                   }}
                 >
                   {isSigningMessage ? (

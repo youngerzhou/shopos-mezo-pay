@@ -1,26 +1,28 @@
 import { defineChain } from 'viem';
 
-/** Centralized Mezo network and token configuration. */
+const defaultSepoliaRpc = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim() || 'https://rpc.test.mezo.org/';
+
+/** Centralized Sepolia / Mezo network and token configuration. */
 export const mezoTestnet = defineChain({
-  id: 31611,
-  name: 'Mezo Testnet',
+  id: 11155111,
+  name: 'Sepolia Testnet',
   nativeCurrency: {
-    name: 'Mezo',
-    symbol: 'MEZO',
+    name: 'Ether',
+    symbol: 'ETH',
     decimals: 18,
   },
   rpcUrls: {
     default: {
-      http: ['https://rpc.test.mezo.org/'],
+      http: [defaultSepoliaRpc],
     },
     public: {
-      http: ['https://rpc.test.mezo.org/'],
+      http: [defaultSepoliaRpc],
     },
   },
   blockExplorers: {
     default: {
-      name: 'Mezo Explorer',
-      url: 'https://explorer.test.mezo.org/',
+      name: 'Sepolia Etherscan',
+      url: 'https://sepolia.etherscan.io/',
     },
   },
   testnet: true,
