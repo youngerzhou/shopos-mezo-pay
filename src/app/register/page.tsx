@@ -191,7 +191,7 @@ function RegisterContent() {
               setWalletGuidance('Identity verified successfully!');
               setIdentityVerified(true);
               if (newMember?.referral_id) {
-                updateIdentityVerification(newMember.referral_id);
+                updateIdentityVerification(newMember.referral_id, signature);
               }
             },
             onError: handleSignatureError,
@@ -246,14 +246,15 @@ function RegisterContent() {
     }
   };
 
-  const updateIdentityVerification = async (referralId: string) => {
+  const updateIdentityVerification = async (referralId: string, signature?: string) => {
     try {
       const res = await fetch('/api/customers/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           referral_id: referralId,
-          action: 'verify_identity'
+          action: 'verify_identity',
+          signature: signature
         }),
       });
       if (!res.ok) {
