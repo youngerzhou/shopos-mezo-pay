@@ -4,7 +4,8 @@ const defaultSepoliaRpc = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim() || 'ht
 
 /** Centralized Sepolia / Mezo network and token configuration. */
 export const mezoTestnet = defineChain({
-  id: 11155111,
+  //id: 11155111,
+  id: 31611,
   name: 'Sepolia Testnet',
   nativeCurrency: {
     name: 'Ether',

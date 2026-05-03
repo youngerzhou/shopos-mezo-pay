@@ -17,14 +17,20 @@ export async function POST(req: NextRequest) {
         const sql = getSql();
 
         if (action === 'verify_identity') {
-            // Update identity verification status
+            const signature = body.signature as string | undefined;
+            if (!signature) {
+                return NextResponse.json({ error: 'Missing signature' }, { status: 400 });
+            }
+            console.log('Backend: verify_identity signature', signature, 'for referral_id', referral_id);
+            // Update identity verification status and persist the wallet signature
             const result = await sql`
         UPDATE customers
-        SET identity_verified = TRUE, verified_at = CURRENT_TIMESTAMP
+        SET identity_verified = TRUE, verified_at = CURRENT_TIMESTAMP, identity_signature = ${signature}
         WHERE referral_id = ${referral_id}
         RETURNING *
       `;
 
+            console.log('Backend: verify_identity result', result[0]);
             if (result.length === 0) {
                 return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
             }
@@ -35,14 +41,44 @@ export async function POST(req: NextRequest) {
             });
         } else if (action === 'enable_fast_pay') {
             // Update fast pay authorization
-            console.log('Backend: Enabling fast pay for referral_id', referral_id, 'allowance_amount', allowance_amount);
-            if (allowance_amount === undefined || allowance_amount === null) {
-                return NextResponse.json({ error: 'Missing allowance_amount for fast pay' }, { status: 400 });
+            const allowanceAmount = Number(allowance_amount);
+            const txHash = body.tx_hash as string | undefined;
+            console.log('Backend: Enabling fast pay for referral_id', referral_id, 'allowance_amount', allowance_amount, 'parsed', allowanceAmount, 'tx_hash', txHash);
+            if (allowance_amount === undefined || allowance_amount === null || Number.isNaN(allowanceAmount)) {
+                return NextResponse.json({ error: 'Missing or invalid allowance_amount for fast pay' }, { status: 400 });
+            }
+
+            // Check for existing fast pay with same tx_hash or allowance_amount to prevent duplicates
+            const existing = await sql`
+        SELECT id, fast_pay_enabled, fast_pay_allowance, fast_pay_tx_hash
+        FROM customers
+        WHERE referral_id = ${referral_id}
+        LIMIT 1
+      `;
+
+            if (existing.length > 0) {
+                const customer = existing[0];
+                if (customer.fast_pay_enabled && customer.fast_pay_allowance === allowanceAmount) {
+                    console.log('Backend: Fast pay already enabled with same allowance, skipping update');
+                    return NextResponse.json({
+                        success: true,
+                        customer: customer,
+                        message: 'Fast pay already enabled with this allowance'
+                    });
+                }
+                if (txHash && customer.fast_pay_tx_hash === txHash) {
+                    console.log('Backend: Fast pay tx_hash already processed, skipping update');
+                    return NextResponse.json({
+                        success: true,
+                        customer: customer,
+                        message: 'Fast pay transaction already processed'
+                    });
+                }
             }
 
             const result = await sql`
         UPDATE customers
-        SET fast_pay_enabled = TRUE, fast_pay_allowance = ${allowance_amount}
+        SET fast_pay_enabled = TRUE, fast_pay_allowance = ${allowanceAmount}, fast_pay_tx_hash = ${txHash || null}
         WHERE referral_id = ${referral_id}
         RETURNING *
       `;
@@ -77,7 +113,7 @@ export async function GET(req: NextRequest) {
         const sql = getSql();
 
         const customer = await sql`
-      SELECT id, username, contact_info, referral_id, identity_verified, verified_at, fast_pay_enabled, fast_pay_allowance, created_at
+      SELECT id, username, contact_info, referral_id, identity_verified, identity_signature, verified_at, fast_pay_enabled, fast_pay_allowance, fast_pay_tx_hash, created_at
       FROM customers
       WHERE referral_id = ${referral_id}
       LIMIT 1

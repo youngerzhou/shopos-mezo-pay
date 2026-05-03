@@ -73,6 +73,7 @@ function RegisterContent() {
   const [selectedAllowance, setSelectedAllowance] = useState(100);
   const [pendingAllowanceAmount, setPendingAllowanceAmount] = useState<number | null>(null);
   const [lastRequestedAllowanceAmount, setLastRequestedAllowanceAmount] = useState<number | null>(null);
+  const approvalAmountRef = useRef<number | null>(null);
   const [authorizedAllowanceAmount, setAuthorizedAllowanceAmount] = useState<number | null>(null);
   const [walletGuidance, setWalletGuidance] = useState<string>('');
   const [hasAutoSignatureRequested, setHasAutoSignatureRequested] = useState(false);
@@ -182,16 +183,25 @@ function RegisterContent() {
         await signMessage(
           { message: 'Welcome to Mezo Pay! Please sign this to verify your identity.' },
           {
-            onSuccess: (signature) => {
+            onSuccess: async (signature) => {
               console.log("Client: Signature received", signature);
               isProcessingSignature.current = false;
               setHasAutoSignatureRequested(false);
               setPendingSignatureRequest(false);
+              setSignatureRequested(false);
               setSignatureRequestError(null);
-              setWalletGuidance('Identity verified successfully!');
-              setIdentityVerified(true);
+
               if (newMember?.referral_id) {
-                updateIdentityVerification(newMember.referral_id, signature);
+                try {
+                  const data = await updateIdentityVerification(newMember.referral_id, signature);
+                  setIdentityVerified(!!data?.customer?.identity_verified);
+                  setWalletGuidance('Identity verified successfully!');
+                } catch (err) {
+                  handleSignatureError(err);
+                }
+              } else {
+                setWalletGuidance('Identity verified successfully!');
+                setIdentityVerified(true);
               }
             },
             onError: handleSignatureError,
@@ -221,25 +231,29 @@ function RegisterContent() {
     }
   };
 
-  const updateFastPayAuthorization = async (referralId: string, allowanceAmount: number) => {
+  const updateFastPayAuthorization = async (referralId: string, allowanceAmount: number, txHash?: string) => {
     try {
       const parsedAllowance = Number(allowanceAmount);
       if (Number.isNaN(parsedAllowance)) {
-        console.error('Invalid allowance amount for fast pay authorization');
+        console.error('Invalid allowance amount for fast pay authorization', allowanceAmount);
         return;
       }
 
+      console.log('Client: updateFastPayAuthorization', { referralId, allowanceAmount: parsedAllowance, txHash });
       const res = await fetch('/api/customers/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           referral_id: referralId,
           action: 'enable_fast_pay',
-          allowance_amount: parsedAllowance
+          allowance_amount: parsedAllowance,
+          tx_hash: txHash
         }),
       });
+      const data = await res.json();
+      console.log('Client: updateFastPayAuthorization response', res.status, data);
       if (!res.ok) {
-        console.error('Failed to update fast pay authorization');
+        console.error('Failed to update fast pay authorization', data);
       }
     } catch (err) {
       console.error('Failed to update fast pay authorization:', err);
@@ -257,19 +271,24 @@ function RegisterContent() {
           signature: signature
         }),
       });
+      const data = await res.json();
+      console.log('Client: updateIdentityVerification response', res.status, data);
       if (!res.ok) {
-        console.error('Failed to update identity verification');
+        throw new Error(data?.error || 'Failed to update identity verification');
       }
+      return data;
     } catch (err) {
       console.error('Failed to update identity verification:', err);
+      throw err;
     }
   };
 
   const requestAllowanceApproval = useCallback(async (amount: number) => {
     if (!isWalletSessionReady || chainId !== mezoTestnet.id) {
-      return;
+      return null;
     }
 
+    approvalAmountRef.current = amount;
     const amountLabel = amount === -1 ? 'Unlimited MUSD' : `${amount} MUSD`;
     setLastRequestedAllowanceAmount(amount);
     setWalletGuidance(`Confirm approval for ${amountLabel} in your wallet. This authorizes the ShopOS Mezo contract to spend up to this amount for Fast Pay.`);
@@ -282,7 +301,7 @@ function RegisterContent() {
         description: `Please confirm approval for ${amountLabel} in MetaMask.`,
       });
 
-      await writeContractAsync({
+      const txHash = await writeContractAsync({
         address: MUSD_ADDRESS as `0x${string}`,
         abi: [
           {
@@ -299,9 +318,14 @@ function RegisterContent() {
         functionName: 'approve',
         args: [SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`, amountUnits],
       });
+
+      console.log('Client: Approval transaction sent', txHash, 'amount', amount);
+      return txHash;
     } catch (err: any) {
       setLastRequestedAllowanceAmount(null);
+      approvalAmountRef.current = null;
       toast({ variant: "destructive", title: "Approval Error", description: err.message });
+      return null;
     }
   }, [chainId, isWalletSessionReady, toast, writeContractAsync]);
 
@@ -319,21 +343,22 @@ function RegisterContent() {
   useEffect(() => {
     if (isApproveConfirmed) {
       setFastPayActive(true);
-      if (lastRequestedAllowanceAmount !== null) {
-        setAuthorizedAllowanceAmount(lastRequestedAllowanceAmount);
-        // Update database with fast pay authorization
-        if (newMember?.referral_id) {
-          updateFastPayAuthorization(newMember.referral_id, lastRequestedAllowanceAmount);
-        }
+      const confirmedAmount = lastRequestedAllowanceAmount ?? approvalAmountRef.current;
+      if (confirmedAmount !== null) {
+        console.log('Client: Fast pay confirmed, authorization amount', confirmedAmount);
+        setAuthorizedAllowanceAmount(confirmedAmount);
+      } else {
+        console.error('Client: Fast pay confirmed but no allowance amount was recorded.');
       }
-      const amountLabel = lastRequestedAllowanceAmount === -1 ? 'Unlimited' : `${lastRequestedAllowanceAmount} MUSD`;
+      const amountLabel = confirmedAmount === -1 ? 'Unlimited' : `${confirmedAmount ?? selectedAllowance} MUSD`;
       setLastRequestedAllowanceAmount(null);
+      approvalAmountRef.current = null;
       toast({
         title: "Fast Pay Authorized!",
         description: `Your wallet approval for ${amountLabel} is now active.`,
       });
     }
-  }, [isApproveConfirmed, lastRequestedAllowanceAmount, newMember, toast]);
+  }, [isApproveConfirmed, lastRequestedAllowanceAmount, selectedAllowance, toast]);
 
   useEffect(() => {
     // Wallet connection status changes - no auto signature
@@ -350,12 +375,14 @@ function RegisterContent() {
 
   const handleEnableFastPay = useCallback(async (amount: number) => {
     if (!mounted) {
+      approvalAmountRef.current = amount;
       setPendingAllowanceAmount(amount);
       setWalletGuidance('Preparing wallet module... please wait a moment and tap authorize again.');
       return;
     }
 
     if (!isConnected) {
+      approvalAmountRef.current = amount;
       setPendingAllowanceAmount(amount);
       setWalletGuidance('No wallet connected. Tap "Connect Wallet (Mobile Link)" and confirm in MetaMask.');
       setOpen(true);
@@ -363,6 +390,7 @@ function RegisterContent() {
     }
 
     if (!isWalletSessionReady) {
+      approvalAmountRef.current = amount;
       setPendingAllowanceAmount(amount);
       setWalletGuidance('Wallet app opened, but session is not ready yet. Complete connection in MetaMask and return here.');
       setOpen(true);
@@ -374,6 +402,7 @@ function RegisterContent() {
     }
 
     if (chainId !== mezoTestnet.id) {
+      approvalAmountRef.current = amount;
       setWalletGuidance('Wrong network detected. Please approve network switch to Mezo Testnet in your wallet.');
       toast({
         title: "Switching Network",
@@ -385,8 +414,11 @@ function RegisterContent() {
     }
 
     setWalletGuidance('Approval request sent. Check MetaMask for the transaction confirmation prompt.');
-    await requestAllowanceApproval(amount);
-  }, [chainId, isConnected, isWalletSessionReady, mounted, requestAllowanceApproval, setOpen, switchChain, toast]);
+    const txHash = await requestAllowanceApproval(amount);
+    if (txHash && newMember?.referral_id) {
+      updateFastPayAuthorization(newMember.referral_id, amount, txHash);
+    }
+  }, [chainId, isConnected, isWalletSessionReady, mounted, newMember, requestAllowanceApproval, setOpen, switchChain, toast]);
 
   const lookupExistingMember = async (contact: string) => {
     if (!contact) return false;
@@ -649,7 +681,7 @@ function RegisterContent() {
                     ) : (
                       <Zap className="w-5 h-5" />
                     )}
-                    {fastPayActive ? 'Fast Pay Enabled' : (!mounted ? 'Loading Wallet...' : (isConnecting || isWalletClientLoading ? 'Checking Wallet...' : (isApproving || isConfirmingApprove ? 'Authorizing...' : `Authorize Tiered Allowance`)))}
+                    {fastPayActive ? 'Fast Pay Enabled' : (!mounted ? 'Loading Wallet...' : (isConnecting || isWalletClientLoading ? 'Checking Wallet...' : (isApproving || isConfirmingApprove ? 'Authorizing...' : `Authorize ${selectedAllowance} MUSD`)))}
                   </Button>
 
                   {!fastPayActive && walletGuidance && (

@@ -39,7 +39,9 @@ export const SCHEMA_DEFINITION = {
     level: "INTEGER DEFAULT 1",
     fast_pay_enabled: "BOOLEAN DEFAULT FALSE",
     fast_pay_allowance: "DECIMAL", // Authorized allowance amount for fast pay
+    fast_pay_tx_hash: "TEXT", // Transaction hash for the approval transaction
     identity_verified: "BOOLEAN DEFAULT FALSE", // Track blockchain identity verification
+    identity_signature: "TEXT", // Store wallet identity signature returned by MetaMask
     verified_at: "TIMESTAMP", // When identity was verified
     created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
   },
