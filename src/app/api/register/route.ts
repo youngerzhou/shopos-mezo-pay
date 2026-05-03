@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    console.log("Backend: Received registration request", body);
     const { username, contact, staff_id } = body;
 
     if (!username || !contact) {
@@ -25,6 +26,7 @@ export async function POST(req: NextRequest) {
     const referral_id = `MEM_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     const id = Math.random().toString(36).substring(7);
 
+    console.log("Backend: Attempting DB insert for address", contact);
     const result = await sql`
       INSERT INTO customers (id, username, contact_info, referral_id, referred_by_staff_id)
       VALUES (${id}, ${username}, ${contact}, ${referral_id}, ${staff_id || null})
@@ -33,6 +35,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result[0]);
   } catch (error: any) {
+    console.error("Backend: DB Insert Error", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

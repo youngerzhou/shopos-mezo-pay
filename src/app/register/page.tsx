@@ -182,7 +182,8 @@ function RegisterContent() {
         await signMessage(
           { message: 'Welcome to Mezo Pay! Please sign this to verify your identity.' },
           {
-            onSuccess: () => {
+            onSuccess: (signature) => {
+              console.log("Client: Signature received", signature);
               isProcessingSignature.current = false;
               setHasAutoSignatureRequested(false);
               setPendingSignatureRequest(false);
@@ -447,6 +448,7 @@ function RegisterContent() {
         throw new Error(data.error || 'Registration failed');
       }
     } catch (err: any) {
+      console.error("Client: Failed to send signature to backend", err);
       toast({ variant: "destructive", title: "Error", description: err.message });
     } finally {
       setLoading(false);
