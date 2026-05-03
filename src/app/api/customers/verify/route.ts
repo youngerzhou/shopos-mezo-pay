@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
+        console.log('Backend: Received verify request', body);
         const { referral_id, action, allowance_amount } = body;
 
         if (!referral_id) {
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
             });
         } else if (action === 'enable_fast_pay') {
             // Update fast pay authorization
+            console.log('Backend: Enabling fast pay for referral_id', referral_id, 'allowance_amount', allowance_amount);
             if (allowance_amount === undefined || allowance_amount === null) {
                 return NextResponse.json({ error: 'Missing allowance_amount for fast pay' }, { status: 400 });
             }
@@ -45,6 +47,7 @@ export async function POST(req: NextRequest) {
         RETURNING *
       `;
 
+            console.log('Backend: fast_pay_enable result', result[0]);
             if (result.length === 0) {
                 return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
             }
@@ -84,6 +87,7 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
         }
 
+        console.log('Backend: Retrieved customer verify data', customer[0]);
         return NextResponse.json(customer[0]);
     } catch (error: any) {
         return NextResponse.json({ error: error.message }, { status: 500 });
