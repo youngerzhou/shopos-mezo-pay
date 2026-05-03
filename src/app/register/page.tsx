@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState, Suspense } from 'react';
+import React, { useCallback, useEffect, useState, Suspense, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   UserPlus,
@@ -79,6 +79,9 @@ function RegisterContent() {
   const [pendingSignatureRequest, setPendingSignatureRequest] = useState(false);
   const [signatureRequestError, setSignatureRequestError] = useState<string | null>(null);
   const [identityVerified, setIdentityVerified] = useState(false);
+  const isProcessingSignature = useRef(false);
+  const isSwitchingNetwork = useRef(false);
+  const [signatureRequested, setSignatureRequested] = useState(false);
 
   const { address, isConnected, isConnecting, status } = useAccount();
   const { switchChain } = useSwitchChain();
@@ -119,6 +122,9 @@ function RegisterContent() {
     !isWalletClientLoading;
 
   const handleSignatureError = useCallback((err: any) => {
+    isProcessingSignature.current = false;
+    isSwitchingNetwork.current = false;
+    setSignatureRequested(false);
     setHasAutoSignatureRequested(false);
     setPendingSignatureRequest(false);
 
@@ -154,13 +160,30 @@ function RegisterContent() {
     if (status !== 'connected' || !isWalletSessionReady) {
       return;
     }
+    if (isProcessingSignature.current) {
+      return;
+    }
 
     const timer = window.setTimeout(async () => {
       try {
+        if (chainId !== mezoTestnet.id) {
+          if (isSwitchingNetwork.current) return;
+          isSwitchingNetwork.current = true;
+          try {
+            await switchChain({ chainId: mezoTestnet.id });
+            isSwitchingNetwork.current = false;
+          } catch (switchErr) {
+            isSwitchingNetwork.current = false;
+            handleSignatureError(switchErr);
+            return;
+          }
+        }
+        isProcessingSignature.current = true;
         await signMessage(
           { message: 'Welcome to Mezo Pay! Please sign this to verify your identity.' },
           {
             onSuccess: () => {
+              isProcessingSignature.current = false;
               setHasAutoSignatureRequested(false);
               setPendingSignatureRequest(false);
               setSignatureRequestError(null);
@@ -179,7 +202,7 @@ function RegisterContent() {
     }, 300);
 
     return () => window.clearTimeout(timer);
-  }, [pendingSignatureRequest, status, isWalletSessionReady, signMessage, handleSignatureError, newMember]);
+  }, [pendingSignatureRequest, status, isWalletSessionReady, signMessage, handleSignatureError, newMember, chainId, switchChain]);
 
   const checkIdentityVerification = async (referralId: string) => {
     try {
@@ -250,7 +273,7 @@ function RegisterContent() {
     setWalletGuidance(`Confirm approval for ${amountLabel} in your wallet. This authorizes the ShopOS Mezo contract to spend up to this amount for Fast Pay.`);
 
     try {
-      const amountUnits = amount === -1 ? maxUint256 : parseUnits(amount.toString(), 18);
+      const amountUnits = amount === -1 ? maxUint256 : parseUnits((Math.round(amount * 100) / 100).toString(), 18);
 
       toast({
         title: "Opening Wallet...",
@@ -317,6 +340,8 @@ function RegisterContent() {
       setLastRequestedAllowanceAmount(null);
       setHasAutoSignatureRequested(false);
       setPendingSignatureRequest(false);
+      setSignatureRequested(false);
+      isSwitchingNetwork.current = false;
       setWalletGuidance('Wallet disconnected. Tap "Connect Wallet (Mobile Link)" and approve the connection in MetaMask.');
     }
   }, [status]);
@@ -661,9 +686,10 @@ function RegisterContent() {
 
                 <Button
                   variant="default"
-                  disabled={!mounted || !isConnected || !status || status !== 'connected' || isSigningMessage || pendingSignatureRequest}
+                  disabled={!mounted || !isConnected || !status || status !== 'connected' || isSigningMessage || pendingSignatureRequest || signatureRequested}
                   className="w-full h-16 rounded-2xl font-black gap-2 bg-secondary text-primary shadow-xl shadow-secondary/20 hover:scale-[1.02] transition-transform"
                   onClick={() => {
+                    setSignatureRequested(true);
                     if (!status || status !== 'connected' || !isConnected) {
                       setWalletGuidance('Please connect your wallet first and confirm the connection in MetaMask.');
                       setOpen(true);
