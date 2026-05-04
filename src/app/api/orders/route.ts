@@ -83,27 +83,34 @@ export async function POST(req: NextRequest) {
     const finalPrice = roundMoney2(baseAmount * (1 - finalDiscountRate));
     const commissionAmount = roundMoney2(customer ? baseAmount * commissionRate : 0);
     const POS_RECIPIENT = await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7');
+    console.log(`[Order] Price computed. base=${baseAmount} final=${finalPrice} discountRate=${finalDiscountRate}`);
 
     // 3. Fast Pay Logic (DB-based Authorization Check)
-    // Requirement: Check DB fast_pay_enabled and fast_pay_allowance
     let fastPayTriggered = false;
-    let fastPayHash = null;
+    let fastPayHash: string | null = null;
+    const dbFastPayEnabled = !!customer?.fast_pay_enabled;
+    const dbFastPayAllowance = Number(customer?.fast_pay_allowance || 0);
+    const fastPayAuthorized =
+      dbFastPayEnabled &&
+      !!walletAddress &&
+      Number.isFinite(dbFastPayAllowance) &&
+      dbFastPayAllowance >= finalPrice;
 
-    if (customer?.fast_pay_enabled && walletAddress) {
-      const dbAllowance = Number(customer.fast_pay_allowance || 0);
-      console.log(`[Fast Pay] Checking DB: Enabled=${customer.fast_pay_enabled}, Allowance=${dbAllowance}, Price=${finalPrice}`);
+    console.log(
+      `[Fast Pay] DB check: enabled=${dbFastPayEnabled}, allowance=${dbFastPayAllowance}, finalPrice=${finalPrice}, authorized=${fastPayAuthorized}`
+    );
 
-      if (dbAllowance >= finalPrice) {
-        console.log(`[Fast Pay] Authorization Passed. Initiating transferFrom for ${finalPrice} MUSD.`);
-        fastPayHash = await executePullPayment(walletAddress, POS_RECIPIENT, finalPrice);
-        if (fastPayHash) {
-          fastPayTriggered = true;
-        } else {
-          console.warn('[Fast Pay] Execution failed. Fallback to manual payment.');
-        }
+    if (fastPayAuthorized && walletAddress) {
+      console.log(`[Fast Pay] Authorized. Executing backend transferFrom for ${finalPrice} MUSD.`);
+      fastPayHash = await executePullPayment(walletAddress, POS_RECIPIENT, finalPrice);
+      if (fastPayHash) {
+        fastPayTriggered = true;
+        console.log(`[Fast Pay] transferFrom success. tx=${fastPayHash}`);
       } else {
-        console.log(`[Fast Pay] Insufficient DB Allowance (${dbAllowance} < ${finalPrice}). Fallback to manual payment.`);
+        console.warn('[Fast Pay] transferFrom returned empty hash. Falling back to pending.');
       }
+    } else {
+      console.log('[Fast Pay] Not authorized by DB policy. Falling back to pending/manual payment.');
     }
 
     // 4. Create Order
@@ -127,7 +134,8 @@ export async function POST(req: NextRequest) {
       passport_level: passportLevel,
       membership_tier: membershipTierLabel,
       referral_applied: !!customer,
-      fast_pay_triggered: fastPayTriggered
+      fast_pay_triggered: fastPayTriggered,
+      fast_pay_authorized: fastPayAuthorized
     });
   } catch (error: any) {
     console.error('API POST /api/orders Error:', error);

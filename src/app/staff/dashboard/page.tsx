@@ -130,7 +130,7 @@ export default function StaffDashboard() {
                 <div className="space-y-4">
                   {stats?.recent_customers?.length > 0 ? (
                     stats.recent_customers.map((c: any) => (
-                      <div key={c.id} className="flex items-center justify-between p-3 rounded-xl bg-muted/50 border">
+                      <div key={c.id ?? c.wallet_address ?? Math.random()} className="flex items-center justify-between p-3 rounded-xl bg-muted/50 border">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center font-bold text-primary">
                             {c.wallet_address ? c.wallet_address.substring(2, 4).toUpperCase() : '??'}
@@ -145,6 +145,7 @@ export default function StaffDashboard() {
                         <Badge variant="outline" className="text-[10px]">Level {c.level}</Badge>
                       </div>
                     ))
+               
                   ) : (
                     <div className="text-center py-10 text-muted-foreground">
                       <Users className="w-10 h-10 mx-auto mb-2 opacity-20" />
