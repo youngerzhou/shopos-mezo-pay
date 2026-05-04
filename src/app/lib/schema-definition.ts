@@ -71,6 +71,16 @@ export const SCHEMA_DEFINITION = {
     id: "SERIAL PRIMARY KEY",
     payload: "JSONB NOT NULL",
     received_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+  },
+  anomaly_logs: {
+    id: "SERIAL PRIMARY KEY",
+    type: "TEXT NOT NULL",
+    referral_id: "TEXT",
+    tx_hash: "TEXT",
+    frontend_amount: "DECIMAL",
+    onchain_amount: "TEXT",
+    error_message: "TEXT",
+    created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
   }
 };
 

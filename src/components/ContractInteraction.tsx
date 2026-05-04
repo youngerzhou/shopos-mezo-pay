@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { 
-  useWriteContract, 
-  useWaitForTransactionReceipt, 
+import {
+  useWriteContract,
+  useWaitForTransactionReceipt,
   useAccount,
   useConnect,
   useSwitchChain
@@ -39,28 +39,28 @@ interface ContractInteractionProps {
   onError: (error: string) => void;
 }
 
-export function ContractInteraction({ 
-  orderId, 
-  amount, 
-  merchantAddress, 
-  onSuccess, 
-  onError 
+export function ContractInteraction({
+  orderId,
+  amount,
+  merchantAddress,
+  onSuccess,
+  onError
 }: ContractInteractionProps) {
   const { toast } = useToast();
   const { address, isConnected } = useAccount();
   const { connect, connectors } = useConnect();
   const { switchChain } = useSwitchChain();
-  
-  const { 
-    writeContract, 
-    data: hash, 
-    isPending, 
-    error: writeError 
+
+  const {
+    writeContract,
+    data: hash,
+    isPending,
+    error: writeError
   } = useWriteContract();
 
-  const { 
-    isLoading: isConfirming, 
-    isSuccess: isConfirmed 
+  const {
+    isLoading: isConfirming,
+    isSuccess: isConfirmed
   } = useWaitForTransactionReceipt({
     hash,
   });
@@ -69,6 +69,16 @@ export function ContractInteraction({
     if (!isConnected) {
       const injected = connectors.find(c => c.id === 'injected');
       if (injected) connect({ connector: injected });
+      return;
+    }
+
+    // 🔒 SECURITY: Enforce ALLOWANCE_TIERS whitelist for amount.
+    // This defends against malicious or misconfigured parent components.
+    // Valid tiers: [100, 500, 1000] MUSD (matches src/app/register/page.tsx & backend logic)
+    const VALID_TIERS = [100, 500, 1000] as const;
+    if (!VALID_TIERS.includes(amount as any)) {
+      onError(`Invalid payment amount: ${amount}. Must be one of [${VALID_TIERS.join(', ')}]`);
+      console.error('[ContractInteraction] Rejected non-whitelisted amount:', { amount, validTiers: [...VALID_TIERS] });
       return;
     }
 
@@ -105,7 +115,7 @@ export function ContractInteraction({
   return (
     <div className="space-y-4">
       {!isConnected ? (
-        <Button 
+        <Button
           className="w-full rounded-2xl h-14 font-black gap-2 bg-primary text-secondary shadow-lg hover:scale-[1.02] transition-transform"
           onClick={() => {
             const injected = connectors.find(c => c.id === 'injected');
@@ -116,7 +126,7 @@ export function ContractInteraction({
           Connect Mezo Wallet
         </Button>
       ) : (
-        <Button 
+        <Button
           disabled={isPending || isConfirming || isConfirmed}
           className="w-full rounded-2xl h-14 font-black gap-2 bg-secondary text-primary shadow-lg hover:shadow-secondary/20 hover:scale-[1.02] transition-transform disabled:opacity-50"
           onClick={handlePayment}

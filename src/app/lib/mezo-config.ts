@@ -1,4 +1,4 @@
-import { defineChain } from 'viem';
+import { defineChain, createPublicClient, http } from 'viem';
 
 const defaultSepoliaRpc = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim() || 'https://rpc.test.mezo.org/';
 
@@ -27,6 +27,11 @@ export const mezoTestnet = defineChain({
     },
   },
   testnet: true,
+});
+
+export const publicClient = createPublicClient({
+  chain: mezoTestnet,
+  transport: http(),
 });
 
 export const MUSD_ADDRESSES = {
