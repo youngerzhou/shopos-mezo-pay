@@ -11,7 +11,6 @@ import { getPassportLevel, calculateDiscountedPrice } from '@/app/lib/passport';
 import {
   getOnChainAllowance,
   getTierForAllowance,
-  checkFastPayAllowance,
   executePullPayment,
 } from '@/app/lib/mezo-pull-payment';
 import { roundMoney2, roundDiscountRate } from '@/app/lib/money';
@@ -42,68 +41,72 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 1. Verify Customer Identity (Retail CRM)
+    // 1. Verify Customer Identity
     const customer = effectiveCustomerId ? await getCustomerByReferralId(effectiveCustomerId) : null;
 
-    // FAST PAY & TIERED DISCOUNT LOGIC: Fetch allowance and determine tier/discount
-    let fastPayTriggered = false;
-    let fastPayHash = null;
+    // 2. Calculate Discounts & Final Price
     let allowanceDiscount = 0;
     let membershipTierLabel = 'Standard';
-
-    if (walletAddress) {
-      // Fetch current on-chain allowance limit
-      const currentAllowance = await getOnChainAllowance(walletAddress);
-      const tierInfo = getTierForAllowance(currentAllowance);
-
-      allowanceDiscount = tierInfo.discount;
-      membershipTierLabel = tierInfo.label;
-      console.log(`[Tiered Discount] Wallet: ${walletAddress} | Tier: ${membershipTierLabel} | Discount: ${allowanceDiscount}`);
-
-      // Handle Pull Payment if enabled
-      if (customer?.fast_pay_enabled) {
-        const isAllowed = await checkFastPayAllowance(walletAddress, baseAmount);
-        if (isAllowed) {
-          console.log(`[Fast Pay] TRIGGERED for customer ${walletAddress}`);
-          const POS_RECIPIENT = await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7');
-          fastPayHash = await executePullPayment(walletAddress, POS_RECIPIENT, baseAmount);
-          if (fastPayHash) {
-            fastPayTriggered = true;
-          }
-        }
-      }
-    }
-
-    // 2. Lock attribution and initial discount
-    // Guest = 0, Member = Global Discount + Tier Discount
-    let finalDiscountRate = customer
-      ? roundDiscountRate(globalDiscountRate + allowanceDiscount)
-      : 0;
+    let finalDiscountRate = 0;
     let passportLevel = 0;
 
-    // 3. Handle Payment Phase (Step 2)
     if (walletAddress) {
-      // Auto-Bind: Permanent link if currently null and we have a confirmed customer
+      // Auto-Bind: Permanent link if currently null
       if (customer && !customer.wallet_address) {
         console.log(`[Auto-Bind] Linking wallet ${walletAddress} to member ${effectiveCustomerId}`);
         await bindWalletToCustomer(effectiveCustomerId, walletAddress);
       }
 
+      // Determine Tier & Allowance Discount (On-Chain)
+      const currentAllowance = await getOnChainAllowance(walletAddress);
+      const tierInfo = getTierForAllowance(currentAllowance);
+      allowanceDiscount = tierInfo.discount;
+      membershipTierLabel = tierInfo.label;
+      console.log(`[Tiered Discount] Wallet: ${walletAddress} | Tier: ${membershipTierLabel} | Discount: ${allowanceDiscount}`);
+
       // Passport analysis
       passportLevel = getPassportLevel(walletAddress);
       const passportData = calculateDiscountedPrice(baseAmount, (passportLevel || 1) as 1 | 2 | 3);
+
+      // Guest = 0, Member = Global Discount + Tier Discount
+      finalDiscountRate = customer
+        ? roundDiscountRate(globalDiscountRate + allowanceDiscount)
+        : 0;
+
       finalDiscountRate = roundDiscountRate(
         finalDiscountRate + passportData.discountRate * passportMultiplier
       );
+    } else {
+      finalDiscountRate = 0;
     }
 
     const finalPrice = roundMoney2(baseAmount * (1 - finalDiscountRate));
     const commissionAmount = roundMoney2(customer ? baseAmount * commissionRate : 0);
-
-    // POS Machine fixed recipient
     const POS_RECIPIENT = await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7');
 
-    // Create order (With Fast Pay status if applicable)
+    // 3. Fast Pay Logic (DB-based Authorization Check)
+    // Requirement: Check DB fast_pay_enabled and fast_pay_allowance
+    let fastPayTriggered = false;
+    let fastPayHash = null;
+
+    if (customer?.fast_pay_enabled && walletAddress) {
+      const dbAllowance = Number(customer.fast_pay_allowance || 0);
+      console.log(`[Fast Pay] Checking DB: Enabled=${customer.fast_pay_enabled}, Allowance=${dbAllowance}, Price=${finalPrice}`);
+
+      if (dbAllowance >= finalPrice) {
+        console.log(`[Fast Pay] Authorization Passed. Initiating transferFrom for ${finalPrice} MUSD.`);
+        fastPayHash = await executePullPayment(walletAddress, POS_RECIPIENT, finalPrice);
+        if (fastPayHash) {
+          fastPayTriggered = true;
+        } else {
+          console.warn('[Fast Pay] Execution failed. Fallback to manual payment.');
+        }
+      } else {
+        console.log(`[Fast Pay] Insufficient DB Allowance (${dbAllowance} < ${finalPrice}). Fallback to manual payment.`);
+      }
+    }
+
+    // 4. Create Order
     const order = await createOrder(
       POS_RECIPIENT,
       finalPrice,

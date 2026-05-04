@@ -36,6 +36,7 @@ import {
 import { ConnectKitButton, useModal } from 'connectkit';
 import { parseUnits, maxUint256 } from 'viem';
 import { mezoTestnet, MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app/lib/mezo-config';
+import { getAddress } from 'viem';
 
 const MUSD_ADDRESS = MUSD_ADDRESSES.testnet;
 const ALLOWANCE_TIERS = [
@@ -181,7 +182,9 @@ function RegisterContent() {
         }
         isProcessingSignature.current = true;
         await signMessage(
-          { message: 'Welcome to Mezo Pay! Please sign this to verify your identity.' },
+          {
+            message: `Welcome to Mezo Pay!\n\nAction: Verify Identity\nAllowance Amount: $${selectedAllowance} MUSD\nReferral ID: ${newMember?.referral_id || 'New User'}\n\nPlease sign this to verify your identity.`
+          },
           {
             onSuccess: async (signature) => {
               console.log("Client: Signature received", signature);
@@ -240,6 +243,7 @@ function RegisterContent() {
       }
 
       console.log('Client: updateFastPayAuthorization', { referralId, allowanceAmount: parsedAllowance, txHash });
+
       const res = await fetch('/api/customers/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -250,13 +254,18 @@ function RegisterContent() {
           tx_hash: txHash
         }),
       });
+
       const data = await res.json();
-      console.log('Client: updateFastPayAuthorization response', res.status, data);
+
       if (!res.ok) {
         console.error('Failed to update fast pay authorization', data);
+        return null; // 如果失败，返回 null
       }
+
+      return data; // ✨ 关键：加上这一行，把后端返回的 {success: true, customer: ...} 给出来
     } catch (err) {
       console.error('Failed to update fast pay authorization:', err);
+      return null; // 出错也返回 null
     }
   };
 
@@ -316,7 +325,7 @@ function RegisterContent() {
           },
         ],
         functionName: 'approve',
-        args: [SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`, amountUnits],
+        args: [getAddress(SHOPOS_PULL_PAYMENT_CONTRACT) as `0x${string}`, amountUnits],
       });
 
       console.log('Client: Approval transaction sent', txHash, 'amount', amount);
@@ -341,25 +350,32 @@ function RegisterContent() {
   }, [chainId, isWalletSessionReady, pendingAllowanceAmount, requestAllowanceApproval]);
 
   useEffect(() => {
+    // 只有当交易确认成功时才执行
     if (isApproveConfirmed) {
       setFastPayActive(true);
-      const confirmedAmount = lastRequestedAllowanceAmount ?? approvalAmountRef.current;
-      if (confirmedAmount !== null) {
-        console.log('Client: Fast pay confirmed, authorization amount', confirmedAmount);
-        setAuthorizedAllowanceAmount(confirmedAmount);
-      } else {
-        console.error('Client: Fast pay confirmed but no allowance amount was recorded.');
-      }
-      const amountLabel = confirmedAmount === -1 ? 'Unlimited' : `${confirmedAmount ?? selectedAllowance} MUSD`;
+
+      // 1. 优先从当前已授权的状态中取值，如果还没有，则使用 UI 选中的值作为回退
+      // 这样可以避免因为 lastRequestedAllowanceAmount 为 null 导致的报错
+      const displayAmount = authorizedAllowanceAmount ?? selectedAllowance;
+
+      // 2. 格式化标签
+      const amountLabel = displayAmount === -1 ? 'Unlimited' : `${displayAmount} MUSD`;
+
+      // 3. 打印日志（可选，用于调试）
+      console.log('Client: Transaction confirmed for', amountLabel);
+
+      // 4. 清理临时引用，防止重复触发
       setLastRequestedAllowanceAmount(null);
       approvalAmountRef.current = null;
+
+      // 5. 弹出成功提示
       toast({
         title: "Fast Pay Authorized!",
         description: `Your wallet approval for ${amountLabel} is now active.`,
       });
     }
-  }, [isApproveConfirmed, lastRequestedAllowanceAmount, selectedAllowance, toast]);
-
+    // 注意：删掉了对 lastRequestedAllowanceAmount 的依赖，防止它变回 null 时重新触发 effect
+  }, [isApproveConfirmed, authorizedAllowanceAmount, selectedAllowance, toast]);
   useEffect(() => {
     // Wallet connection status changes - no auto signature
     if (status === 'disconnected') {
@@ -416,7 +432,14 @@ function RegisterContent() {
     setWalletGuidance('Approval request sent. Check MetaMask for the transaction confirmation prompt.');
     const txHash = await requestAllowanceApproval(amount);
     if (txHash && newMember?.referral_id) {
-      updateFastPayAuthorization(newMember.referral_id, amount, txHash);
+      // 修改这里：接收后端返回的结果
+      const response = await updateFastPayAuthorization(newMember.referral_id, amount, txHash);
+
+      // 强制同步前端状态
+      if (response && response.success) {
+        setAuthorizedAllowanceAmount(amount); // 手动设为 1000
+        setFastPayActive(true);
+      }
     }
   }, [chainId, isConnected, isWalletSessionReady, mounted, newMember, requestAllowanceApproval, setOpen, switchChain, toast]);
 
