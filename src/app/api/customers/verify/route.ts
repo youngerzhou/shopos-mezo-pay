@@ -48,6 +48,13 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ error: 'Missing or invalid allowance_amount for fast pay' }, { status: 400 });
             }
 
+            // Security: Validate allowance amount against authorized whitelist
+            const ALLOWANCE_TIERS = [100, 500, 1000];
+            if (!ALLOWANCE_TIERS.includes(allowanceAmount)) {
+                console.warn('[Backend/verify] Rejected non-whitelisted allowance amount:', allowanceAmount);
+                return NextResponse.json({ error: 'Invalid allowance amount. Must be one of 100, 500, or 1000.' }, { status: 400 });
+            }
+
             // Check for existing fast pay with same tx_hash or allowance_amount to prevent duplicates
             const existing = await sql`
         SELECT id, fast_pay_enabled, fast_pay_allowance, fast_pay_tx_hash
