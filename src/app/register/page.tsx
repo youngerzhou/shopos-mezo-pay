@@ -34,9 +34,8 @@ import {
   useChainId
 } from 'wagmi';
 import { ConnectKitButton, useModal } from 'connectkit';
-import { parseUnits, maxUint256 } from 'viem';
+import { getAddress, isAddress, parseUnits, maxUint256 } from 'viem';
 import { mezoTestnet, MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app/lib/mezo-config';
-import { getAddress } from 'viem';
 
 const MUSD_ADDRESS = MUSD_ADDRESSES.testnet;
 const ALLOWANCE_TIERS = [
@@ -303,6 +302,13 @@ function RegisterContent() {
     setWalletGuidance(`Confirm approval for ${amountLabel} in your wallet. This authorizes the ShopOS Mezo contract to spend up to this amount for Fast Pay.`);
 
     try {
+      if (!isAddress(MUSD_ADDRESS)) {
+        throw new Error('Invalid NEXT_PUBLIC_MUSD_ADDRESS configuration.');
+      }
+      if (!isAddress(SHOPOS_PULL_PAYMENT_CONTRACT)) {
+        throw new Error('Invalid NEXT_PUBLIC_SHOPOS_PULL_PAYMENT_CONTRACT configuration.');
+      }
+
       const amountUnits = amount === -1 ? maxUint256 : parseUnits((Math.round(amount * 100) / 100).toString(), 18);
 
       toast({

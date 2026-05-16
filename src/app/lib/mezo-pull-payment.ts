@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, Hex, http, parseUnits } from 'viem';
+import { createPublicClient, createWalletClient, Hex, http, isAddress, parseUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { mezoTestnet, MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app/lib/mezo-config';
 
@@ -27,10 +27,28 @@ export const publicClient = createPublicClient({
   transport: http()
 });
 
+function assertAddress(value: string, message: string): asserts value is `0x${string}` {
+  if (!isAddress(value)) {
+    throw new Error(message);
+  }
+}
+
+function validateFastPayAddresses(customerAddress: string, recipientAddress?: string) {
+  assertAddress(MUSD_ADDRESS, 'Invalid MUSD token address');
+  assertAddress(SHOPOS_PULL_PAYMENT_CONTRACT, 'Invalid SHOPOS_PULL_PAYMENT_CONTRACT address');
+  assertAddress(customerAddress, 'Invalid customer wallet address');
+
+  if (recipientAddress !== undefined) {
+    assertAddress(recipientAddress, 'Invalid recipient wallet address');
+  }
+}
+
 export async function getOnChainAllowance(customerAddress: string): Promise<bigint> {
+  validateFastPayAddresses(customerAddress);
+
   try {
     const allowance = await publicClient.readContract({
-      address: MUSD_ADDRESS as `0x${string}`,
+      address: MUSD_ADDRESS,
       abi: [
         {
           name: 'allowance',
@@ -43,12 +61,12 @@ export async function getOnChainAllowance(customerAddress: string): Promise<bigi
         }
       ],
       functionName: 'allowance',
-      args: [customerAddress as `0x${string}`, SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`]
+      args: [customerAddress, SHOPOS_PULL_PAYMENT_CONTRACT]
     }) as bigint;
     return allowance;
   } catch (err) {
     console.error('Allowance fetch failed:', err);
-    return 0n;
+    throw err;
   }
 }
 
@@ -58,6 +76,8 @@ export async function checkFastPayAllowance(customerAddress: string, amount: num
 }
 
 export async function executePullPayment(customerAddress: string, recipientAddress: string, amount: number): Promise<string | null> {
+  validateFastPayAddresses(customerAddress, recipientAddress);
+
   const roundedAmount = Math.round(Number(amount) * 100) / 100;
   if (!Number.isFinite(roundedAmount) || roundedAmount <= 0) {
     throw new Error(`Invalid Fast Pay amount: ${amount}`);
@@ -90,7 +110,7 @@ export async function executePullPayment(customerAddress: string, recipientAddre
   });
 
   const hash = await walletClient.writeContract({
-    address: SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`,
+    address: SHOPOS_PULL_PAYMENT_CONTRACT,
     abi: [
       {
         name: 'pullPayment',
@@ -106,8 +126,8 @@ export async function executePullPayment(customerAddress: string, recipientAddre
     ],
     functionName: 'pullPayment',
     args: [
-      customerAddress as `0x${string}`,
-      recipientAddress as `0x${string}`,
+      customerAddress,
+      recipientAddress,
       amountInUnits
     ]
   });

@@ -35,8 +35,9 @@ export const publicClient = createPublicClient({
 });
 
 export const MUSD_ADDRESSES = {
-  testnet: '0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503',
+  testnet: process.env.NEXT_PUBLIC_MUSD_ADDRESS?.trim() || '0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503',
   mainnet: '0xdD468A1DDc392dcdbEf6db6e34E89AA338F9F186',
 } as const;
 
-export const SHOPOS_PULL_PAYMENT_CONTRACT = '0x489622dCC88cc10787A9A9A9A9A9A9A9A9A9A9A9' as const;
+export const SHOPOS_PULL_PAYMENT_CONTRACT =
+  process.env.NEXT_PUBLIC_SHOPOS_PULL_PAYMENT_CONTRACT?.trim() || '';
