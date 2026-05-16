@@ -73,6 +73,8 @@ interface MezoOrder {
 interface Membership {
   referral_id: string;
   username: string | null;
+  wallet_address?: string | null;
+  wallet_address_display?: string | null;
   total_spent: number;
   level: number;
   level_code: string;
@@ -229,9 +231,14 @@ export default function ShoposHome() {
 
     setMemberId(data.referral_id);
     setMembership(data);
+    if (data.wallet_address && WALLET_RE.test(data.wallet_address)) {
+      setWalletAddress(data.wallet_address.toLowerCase());
+    }
     toast({
       title: 'Member Card Recognized',
-      description: `${data.level_name} member discount applied.`
+      description: data.wallet_address_display
+        ? `${data.level_name} member discount applied. Wallet ${data.wallet_address_display} ready for Fast Pay.`
+        : `${data.level_name} member discount applied.`
     });
   }, [toast]);
 
@@ -239,6 +246,7 @@ export default function ShoposHome() {
     const value = rawValue.trim();
     if (!value) return;
 
+    setIsScanning(false);
     setLoading(true);
     resetCheckoutState();
 
@@ -312,7 +320,7 @@ export default function ShoposHome() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerId: memberId,
-          walletAddress: undefined,
+          walletAddress: walletAddress || undefined,
           amount: posData.total_amount
         })
       });
@@ -612,6 +620,12 @@ export default function ShoposHome() {
                 <QrCode className="mr-2 h-4 w-4" />
                 Scan with Camera
               </Button>
+              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs font-black uppercase tracking-wide text-slate-500">
+                <span>Camera status</span>
+                <span className={isScanning ? 'text-emerald-700' : 'text-slate-400'}>
+                  {isScanning ? 'Camera active' : 'Camera off'}
+                </span>
+              </div>
               <p className="text-xs font-medium text-slate-400">Demo barcodes: SHOPOS100, SHOPOS500, SHOPOS1000</p>
             </CardContent>
           </Card>

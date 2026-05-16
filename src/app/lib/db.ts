@@ -54,6 +54,8 @@ export interface MemberLevel {
 export interface CustomerMembership {
   referral_id: string;
   username: string | null;
+  wallet_address?: string | null;
+  wallet_address_display?: string | null;
   total_spent: number;
   level: number;
   level_code: string;
@@ -349,6 +351,7 @@ export async function getCustomerMembership(referralId: string): Promise<Custome
     SELECT
       referral_id,
       username,
+      wallet_address,
       COALESCE(total_spent, 0)::float as total_spent,
       COALESCE(level, 1)::int as level
     FROM customers
@@ -359,6 +362,7 @@ export async function getCustomerMembership(referralId: string): Promise<Custome
   if (customers.length === 0) return null;
 
   const customer = customers[0];
+  const walletAddress = customer.wallet_address ? String(customer.wallet_address).toLowerCase().trim() : null;
   const memberLevel = await getMemberLevelBySpend(Number(customer.total_spent || 0));
 
   if (Number(customer.level) !== Number(memberLevel.sort_order)) {
@@ -372,6 +376,8 @@ export async function getCustomerMembership(referralId: string): Promise<Custome
   return {
     referral_id: customer.referral_id,
     username: customer.username || null,
+    wallet_address: walletAddress,
+    wallet_address_display: walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : null,
     total_spent: roundMoney2(Number(customer.total_spent || 0)),
     level: Number(memberLevel.sort_order),
     level_code: memberLevel.level_code,

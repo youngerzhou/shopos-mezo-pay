@@ -1,14 +1,14 @@
 
 "use client";
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, X, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Html5Qrcode } from 'html5-qrcode';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 interface ScannerProps {
-  onScan: (address: string) => void;
+  onScan: (address: string) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -18,8 +18,49 @@ export function Scanner({ onScan, onClose }: ScannerProps) {
   const [cameraActive, setCameraActive] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const isHandlingScan = useRef(false);
+  const isMounted = useRef(true);
+
+  const stopMediaTracks = useCallback(() => {
+    const container = document.getElementById('qr-reader');
+    if (!container) return;
+
+    const videos = container.querySelectorAll('video');
+    videos.forEach((video) => {
+      const stream = video.srcObject as MediaStream | null;
+      if (stream && typeof stream.getTracks === 'function') {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+
+      video.srcObject = null;
+      video.removeAttribute('src');
+      video.load();
+    });
+  }, []);
+
+  const stopScanner = useCallback(async () => {
+    const scanner = scannerRef.current;
+
+    try {
+      if (scanner?.isScanning) {
+        await scanner.stop();
+      }
+
+      stopMediaTracks();
+      scanner?.clear();
+    } catch (err) {
+      console.error('Stop scanner error:', err);
+    } finally {
+      stopMediaTracks();
+
+      if (isMounted.current) {
+        setCameraActive(false);
+        setHasCameraPermission(false);
+      }
+    }
+  }, [stopMediaTracks]);
 
   useEffect(() => {
+    isMounted.current = true;
     const scanner = new Html5Qrcode("qr-reader");
     scannerRef.current = scanner;
 
@@ -31,87 +72,66 @@ export function Scanner({ onScan, onClose }: ScannerProps) {
             fps: 10,
             qrbox: { width: 250, height: 250 },
           },
-          (decodedText) => {
+          async (decodedText) => {
             if (isHandlingScan.current) return;
             isHandlingScan.current = true;
 
-            // Immediately attempt to stop to avoid double scanning or UI lag
-            onScan(decodedText);
-            stopScanner();
+            await stopScanner();
+            await onScan(decodedText);
           },
           () => { } // Quietly ignore frame errors
         );
-        setHasCameraPermission(true);
-        setCameraActive(true);
+
+        if (isMounted.current) {
+          setHasCameraPermission(true);
+          setCameraActive(true);
+        }
       } catch (err) {
         console.error('Scanner start error:', err);
-        setError('Camera access failed. Check browser permissions.');
-        setHasCameraPermission(false);
+        stopMediaTracks();
+
+        if (isMounted.current) {
+          setError('Camera access failed. Check browser permissions.');
+          setHasCameraPermission(false);
+          setCameraActive(false);
+        }
       }
     };
 
     startScanner();
 
     return () => {
-      stopScanner();
+      isMounted.current = false;
+      void stopScanner();
     };
-  }, [onScan]);
+  }, [onScan, stopMediaTracks, stopScanner]);
 
-  const stopScanner = async () => {
-    if (scannerRef.current && scannerRef.current.isScanning) {
-      try {
-        await scannerRef.current.stop();
-        scannerRef.current.clear();
-      } catch (err) {
-        console.error('Stop scanner error:', err);
-      }
-    }
-
-    try {
-      const container = document.getElementById('qr-reader');
-      if (container) {
-        const videos = container.querySelectorAll('video');
-        videos.forEach((video) => {
-          // @ts-ignore
-          const stream: MediaStream | null = video.srcObject as MediaStream | null;
-          if (stream && typeof stream.getTracks === 'function') {
-            stream.getTracks().forEach((track) => {
-              try { track.stop(); } catch (e) { /* ignore */ }
-            });
-          }
-          try {
-            // @ts-ignore
-            video.srcObject = null;
-            // also clear src in case a blob URL was used
-            // @ts-ignore
-            video.removeAttribute('src');
-            // @ts-ignore
-            video.load && video.load();
-          } catch (e) {
-            // ignore
-          }
-        });
-      }
-    } catch (err) {
-      console.error('Error while stopping media tracks:', err);
-    }
-
-    setCameraActive(false);
-    setHasCameraPermission(false);
+  const handleClose = async () => {
+    await stopScanner();
+    onClose();
   };
+
+  const cameraStatus = cameraActive ? 'Camera active' : 'Camera off';
 
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-4">
       <div className="relative w-full max-w-md bg-muted rounded-2xl overflow-hidden border-4 border-secondary shadow-2xl aspect-square">
         <div id="qr-reader" className="w-full h-full" />
         <div className="absolute top-3 right-3 z-50 rounded-full px-3 py-1 text-xs font-bold text-white/90 bg-black/50">
-          {cameraActive ? 'Camera active' : 'Camera off'}
+          {cameraStatus}
         </div>
 
-        {(!hasCameraPermission && !error) && (
+        {(!hasCameraPermission && !error && cameraActive) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white p-6 text-center">
             <Camera className="w-12 h-12 mb-4 animate-pulse" />
             <p className="font-medium">Requesting Camera Access...</p>
+          </div>
+        )}
+
+        {(!hasCameraPermission && !error && !cameraActive) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white p-6 text-center">
+            <Camera className="w-12 h-12 mb-4" />
+            <p className="font-medium">{cameraStatus}</p>
           </div>
         )}
 
@@ -135,7 +155,7 @@ export function Scanner({ onScan, onClose }: ScannerProps) {
       </p>
 
       <Button
-        onClick={onClose}
+        onClick={handleClose}
         variant="ghost"
         className="mt-8 text-white hover:bg-white/10"
       >
