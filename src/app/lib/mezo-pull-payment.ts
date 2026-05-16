@@ -1,8 +1,9 @@
-import { createPublicClient, createWalletClient, Hex, http, isAddress, parseUnits } from 'viem';
+import { createPublicClient, createWalletClient, formatUnits, Hex, http, isAddress, parseUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { mezoTestnet, MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app/lib/mezo-config';
 
 const MUSD_ADDRESS = MUSD_ADDRESSES.testnet;
+const DEFAULT_MUSD_DECIMALS = 18;
 
 export const ALLOWANCE_TIERS = [
   { amount: 100, discount: 0.05, label: 'Silver' },
@@ -27,6 +28,50 @@ export const publicClient = createPublicClient({
   transport: http()
 });
 
+const erc20DebugAbi = [
+  {
+    name: 'allowance',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'spender', type: 'address' }
+    ],
+    outputs: [{ name: '', type: 'uint256' }]
+  },
+  {
+    name: 'decimals',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint8' }]
+  },
+  {
+    name: 'balanceOf',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }]
+  }
+] as const;
+
+const pullPaymentDebugAbi = [
+  {
+    name: 'owner',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }]
+  },
+  {
+    name: 'operators',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }]
+  }
+] as const;
+
 function assertAddress(value: string, message: string): asserts value is `0x${string}` {
   if (!isAddress(value)) {
     throw new Error(message);
@@ -43,23 +88,103 @@ function validateFastPayAddresses(customerAddress: string, recipientAddress?: st
   }
 }
 
+async function getMusdDecimals(): Promise<number> {
+  try {
+    return Number(await publicClient.readContract({
+      address: MUSD_ADDRESS,
+      abi: erc20DebugAbi,
+      functionName: 'decimals'
+    }));
+  } catch (err) {
+    console.warn(`[Fast Pay Debug] Failed to read MUSD decimals. Falling back to ${DEFAULT_MUSD_DECIMALS}.`, err);
+    return DEFAULT_MUSD_DECIMALS;
+  }
+}
+
+async function logFastPayDebugSnapshot(params: {
+  customerAddress: `0x${string}`;
+  recipientAddress?: `0x${string}`;
+  amountInUnits?: bigint;
+  relayerAddress?: `0x${string}`;
+  stage: string;
+}) {
+  const { customerAddress, recipientAddress, amountInUnits, relayerAddress, stage } = params;
+
+  try {
+    const decimals = await getMusdDecimals();
+    const [allowance, customerBalance, merchantBalance, contractOwner, relayerIsOperator] = await Promise.all([
+      publicClient.readContract({
+        address: MUSD_ADDRESS,
+        abi: erc20DebugAbi,
+        functionName: 'allowance',
+        args: [customerAddress, SHOPOS_PULL_PAYMENT_CONTRACT]
+      }) as Promise<bigint>,
+      publicClient.readContract({
+        address: MUSD_ADDRESS,
+        abi: erc20DebugAbi,
+        functionName: 'balanceOf',
+        args: [customerAddress]
+      }) as Promise<bigint>,
+      recipientAddress
+        ? publicClient.readContract({
+            address: MUSD_ADDRESS,
+            abi: erc20DebugAbi,
+            functionName: 'balanceOf',
+            args: [recipientAddress]
+          }) as Promise<bigint>
+        : Promise.resolve(null),
+      publicClient.readContract({
+        address: SHOPOS_PULL_PAYMENT_CONTRACT,
+        abi: pullPaymentDebugAbi,
+        functionName: 'owner'
+      }) as Promise<`0x${string}`>,
+      relayerAddress
+        ? publicClient.readContract({
+            address: SHOPOS_PULL_PAYMENT_CONTRACT,
+            abi: pullPaymentDebugAbi,
+            functionName: 'operators',
+            args: [relayerAddress]
+          }) as Promise<boolean>
+        : Promise.resolve(null)
+    ]);
+
+    const relayerIsOwner = relayerAddress
+      ? contractOwner.toLowerCase() === relayerAddress.toLowerCase()
+      : null;
+
+    console.log('[Fast Pay Debug]', {
+      stage,
+      chainId: mezoTestnet.id,
+      musdAddress: MUSD_ADDRESS,
+      pullPaymentContract: SHOPOS_PULL_PAYMENT_CONTRACT,
+      customerAddress,
+      recipientAddress,
+      relayerAddress,
+      tokenDecimals: decimals,
+      allowanceRaw: allowance.toString(),
+      allowanceMUSD: formatUnits(allowance, decimals),
+      amountRaw: amountInUnits?.toString(),
+      amountMUSD: amountInUnits === undefined ? undefined : formatUnits(amountInUnits, decimals),
+      customerBalanceRaw: customerBalance.toString(),
+      customerBalanceMUSD: formatUnits(customerBalance, decimals),
+      merchantBalanceRaw: merchantBalance?.toString(),
+      merchantBalanceMUSD: merchantBalance === null ? undefined : formatUnits(merchantBalance, decimals),
+      contractOwner,
+      relayerIsOwner,
+      relayerIsOperator
+    });
+  } catch (err) {
+    console.error('[Fast Pay Debug] Snapshot failed:', err);
+  }
+}
+
 export async function getOnChainAllowance(customerAddress: string): Promise<bigint> {
   validateFastPayAddresses(customerAddress);
 
   try {
     const allowance = await publicClient.readContract({
       address: MUSD_ADDRESS,
-      abi: [
-        {
-          name: 'allowance',
-          type: 'function',
-          inputs: [
-            { name: 'owner', type: 'address' },
-            { name: 'spender', type: 'address' }
-          ],
-          outputs: [{ name: '', type: 'uint256' }]
-        }
-      ],
+      abi: erc20DebugAbi,
       functionName: 'allowance',
       args: [customerAddress, SHOPOS_PULL_PAYMENT_CONTRACT]
     }) as bigint;
@@ -83,13 +208,38 @@ export async function executePullPayment(customerAddress: string, recipientAddre
     throw new Error(`Invalid Fast Pay amount: ${amount}`);
   }
 
-  const amountInUnits = parseUnits(roundedAmount.toFixed(2), 18);
+  const tokenDecimals = await getMusdDecimals();
+  const amountInUnits = parseUnits(roundedAmount.toFixed(2), tokenDecimals);
   const allowance = await getOnChainAllowance(customerAddress);
-  if (allowance < amountInUnits) {
-    throw new Error(`Insufficient Fast Pay allowance for ${roundedAmount.toFixed(2)} MUSD.`);
+
+  let relayerAddress: `0x${string}` | undefined;
+  const relayerPrivateKey = process.env.RELAYER_PRIVATE_KEY?.trim();
+  if (relayerPrivateKey) {
+    const normalizedPrivateKeyForDebug = relayerPrivateKey.startsWith('0x')
+      ? relayerPrivateKey
+      : `0x${relayerPrivateKey}`;
+
+    if (/^0x[a-fA-F0-9]{64}$/.test(normalizedPrivateKeyForDebug)) {
+      relayerAddress = privateKeyToAccount(normalizedPrivateKeyForDebug as Hex).address;
+    }
   }
 
-  const relayerPrivateKey = process.env.RELAYER_PRIVATE_KEY?.trim();
+  await logFastPayDebugSnapshot({
+    customerAddress,
+    recipientAddress,
+    amountInUnits,
+    relayerAddress,
+    stage: 'before-pull-payment'
+  });
+
+  if (allowance < amountInUnits) {
+    throw new Error(
+      `Insufficient Fast Pay allowance for ${roundedAmount.toFixed(2)} MUSD. ` +
+      `onChainAllowance=${formatUnits(allowance, tokenDecimals)} MUSD, ` +
+      `spender=${SHOPOS_PULL_PAYMENT_CONTRACT}`
+    );
+  }
+
   if (!relayerPrivateKey) {
     throw new Error('RELAYER_PRIVATE_KEY is required to execute Fast Pay pull payments.');
   }

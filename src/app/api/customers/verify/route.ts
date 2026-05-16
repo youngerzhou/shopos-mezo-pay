@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSql, ensureDb } from '@/app/lib/db';
+import { getOnChainAllowance } from '@/app/lib/mezo-pull-payment';
 
 export const dynamic = 'force-dynamic';
+
+const ALLOWANCE_TIERS = [100, 500, 1000];
+
+function allowanceUnitsToMusd(allowance: bigint) {
+    return Number(allowance) / 1e18;
+}
 
 export async function POST(req: NextRequest) {
     try {
@@ -55,21 +62,57 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ error: 'Missing or invalid allowance_amount for fast pay' }, { status: 400 });
             }
 
-            // Security: Validate allowance amount against authorized whitelist
-            const ALLOWANCE_TIERS = [100, 500, 1000];
             if (!ALLOWANCE_TIERS.includes(allowanceAmount)) {
                 console.warn('[Backend/verify] Rejected non-whitelisted allowance amount:', allowanceAmount);
                 return NextResponse.json({ error: 'Invalid allowance amount. Must be one of 100, 500, or 1000.' }, { status: 400 });
             }
 
-            // Check for existing fast pay with same tx_hash or allowance_amount to prevent duplicates
             const existing = await sql`
-        SELECT id, fast_pay_enabled, fast_pay_allowance, fast_pay_tx_hash
+        SELECT id, wallet_address, fast_pay_enabled, fast_pay_allowance, fast_pay_tx_hash
         FROM customers
         WHERE referral_id = ${referral_id}
         LIMIT 1
       `;
 
+            if (existing.length === 0) {
+                return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+            }
+
+            const walletAddress = existing[0].wallet_address;
+            if (!walletAddress) {
+                return NextResponse.json({ error: 'Customer wallet address is required before enabling Fast Pay' }, { status: 400 });
+            }
+
+            const onChainAllowance = await getOnChainAllowance(walletAddress);
+            const onChainAllowanceMusd = allowanceUnitsToMusd(onChainAllowance);
+            const onChainAuthorized = onChainAllowance > 0n && onChainAllowanceMusd >= allowanceAmount;
+
+            console.log('[Backend/verify] Fast Pay on-chain allowance check', {
+                referral_id,
+                walletAddress,
+                requestedAllowance: allowanceAmount,
+                onChainAllowanceRaw: onChainAllowance.toString(),
+                onChainAllowanceMusd,
+                onChainAuthorized
+            });
+
+            if (!onChainAuthorized) {
+                const disabled = await sql`
+          UPDATE customers
+          SET fast_pay_enabled = FALSE, fast_pay_allowance = ${onChainAllowanceMusd}, fast_pay_tx_hash = ${txHash || null}
+          WHERE referral_id = ${referral_id}
+          RETURNING *
+        `;
+
+                return NextResponse.json({
+                    error: 'Fast Pay approval was not found on-chain for the configured ShopOS PullPayment contract.',
+                    fast_pay_enabled: false,
+                    fast_pay_allowance: onChainAllowanceMusd,
+                    customer: disabled[0]
+                }, { status: 400 });
+            }
+
+            // Check for existing fast pay with same tx_hash or allowance_amount after current on-chain allowance is verified.
             if (existing.length > 0) {
                 const customer = existing[0];
                 if (customer.fast_pay_enabled && customer.fast_pay_allowance === allowanceAmount) {
@@ -92,7 +135,7 @@ export async function POST(req: NextRequest) {
 
             const result = await sql`
         UPDATE customers
-        SET fast_pay_enabled = TRUE, fast_pay_allowance = ${allowanceAmount}, fast_pay_tx_hash = ${txHash || null}
+        SET fast_pay_enabled = TRUE, fast_pay_allowance = ${onChainAllowanceMusd}, fast_pay_tx_hash = ${txHash || null}
         WHERE referral_id = ${referral_id}
         RETURNING *
       `;
@@ -104,7 +147,55 @@ export async function POST(req: NextRequest) {
 
             return NextResponse.json({
                 success: true,
-                customer: result[0]
+                customer: {
+                    ...result[0],
+                    fast_pay_authorized: !!result[0].fast_pay_enabled
+                }
+            });
+        } else if (action === 'sync_fast_pay') {
+            const txHash = body.tx_hash as string | undefined;
+            const existing = await sql`
+        SELECT id, wallet_address
+        FROM customers
+        WHERE referral_id = ${referral_id}
+        LIMIT 1
+      `;
+
+            if (existing.length === 0) {
+                return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+            }
+
+            const walletAddress = existing[0].wallet_address;
+            if (!walletAddress) {
+                return NextResponse.json({ error: 'Customer wallet address is required before syncing Fast Pay' }, { status: 400 });
+            }
+
+            const onChainAllowance = await getOnChainAllowance(walletAddress);
+            const onChainAllowanceMusd = allowanceUnitsToMusd(onChainAllowance);
+            const fastPayEnabled = onChainAllowance > 0n;
+
+            const result = await sql`
+        UPDATE customers
+        SET fast_pay_enabled = ${fastPayEnabled}, fast_pay_allowance = ${onChainAllowanceMusd}, fast_pay_tx_hash = COALESCE(${txHash || null}, fast_pay_tx_hash)
+        WHERE referral_id = ${referral_id}
+        RETURNING id, username, contact_info, referral_id, wallet_address, identity_verified, identity_signature, verified_at, fast_pay_enabled, fast_pay_allowance, fast_pay_tx_hash, created_at
+      `;
+
+            console.log('[Backend/verify] Synced Fast Pay after customer allowance refresh', {
+                referral_id,
+                walletAddress,
+                txHash,
+                onChainAllowanceRaw: onChainAllowance.toString(),
+                onChainAllowanceMusd,
+                fastPayEnabled
+            });
+
+            return NextResponse.json({
+                success: true,
+                customer: {
+                    ...result[0],
+                    fast_pay_authorized: fastPayEnabled
+                }
             });
         } else {
             return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
@@ -127,7 +218,7 @@ export async function GET(req: NextRequest) {
         const sql = getSql();
 
         const customer = await sql`
-      SELECT id, username, contact_info, referral_id, identity_verified, identity_signature, verified_at, fast_pay_enabled, fast_pay_allowance, fast_pay_tx_hash, created_at
+      SELECT id, username, contact_info, referral_id, wallet_address, identity_verified, identity_signature, verified_at, fast_pay_enabled, fast_pay_allowance, fast_pay_tx_hash, created_at
       FROM customers
       WHERE referral_id = ${referral_id}
       LIMIT 1
@@ -137,8 +228,43 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
         }
 
-        console.log('Backend: Retrieved customer verify data', customer[0]);
-        return NextResponse.json(customer[0]);
+        const syncedCustomer = { ...customer[0] };
+        if (syncedCustomer.wallet_address) {
+            try {
+                const onChainAllowance = await getOnChainAllowance(syncedCustomer.wallet_address);
+                const onChainAllowanceMusd = allowanceUnitsToMusd(onChainAllowance);
+                const fastPayEnabled = onChainAllowance > 0n;
+
+                const result = await sql`
+          UPDATE customers
+          SET fast_pay_enabled = ${fastPayEnabled}, fast_pay_allowance = ${onChainAllowanceMusd}
+          WHERE referral_id = ${referral_id}
+          RETURNING id, username, contact_info, referral_id, wallet_address, identity_verified, identity_signature, verified_at, fast_pay_enabled, fast_pay_allowance, fast_pay_tx_hash, created_at
+        `;
+
+                Object.assign(syncedCustomer, {
+                    ...result[0],
+                    fast_pay_authorized: fastPayEnabled
+                });
+                console.log('[Backend/verify] Synced Fast Pay from on-chain allowance', {
+                    referral_id,
+                    walletAddress: syncedCustomer.wallet_address,
+                    onChainAllowanceRaw: onChainAllowance.toString(),
+                    onChainAllowanceMusd,
+                    fastPayEnabled
+                });
+            } catch (err) {
+                console.warn('[Backend/verify] Failed to sync Fast Pay allowance from chain:', err);
+                syncedCustomer.fast_pay_enabled = false;
+                syncedCustomer.fast_pay_authorized = false;
+            }
+        } else {
+            syncedCustomer.fast_pay_enabled = false;
+            syncedCustomer.fast_pay_authorized = false;
+        }
+
+        console.log('Backend: Retrieved customer verify data', syncedCustomer);
+        return NextResponse.json(syncedCustomer);
     } catch (error: any) {
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
