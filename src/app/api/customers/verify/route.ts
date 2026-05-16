@@ -41,15 +41,13 @@ export async function POST(req: NextRequest) {
             });
         } else if (action === 'enable_fast_pay') {
             // Update fast pay authorization
-            // --- 在这里增加或修改打印逻辑 ---
             console.log('====================================');
-            console.log('🚀 收到前端授权请求!');
-            console.log('👤 用户 ID:', referral_id);
-            console.log('💰 授权金额:', allowance_amount);
-            console.log('⛓️ 交易哈希:', body.tx_hash);
+            console.log('Received frontend authorization request.');
+            console.log('User ID:', referral_id);
+            console.log('Allowance amount:', allowance_amount);
+            console.log('Transaction hash:', body.tx_hash);
             console.log('====================================');
 
-            // ... 后续逻辑
             const allowanceAmount = Number(allowance_amount);
             const txHash = body.tx_hash as string | undefined;
             console.log('Backend: Enabling fast pay for referral_id', referral_id, 'allowance_amount', allowance_amount, 'parsed', allowanceAmount, 'tx_hash', txHash);

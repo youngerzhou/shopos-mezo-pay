@@ -15,6 +15,7 @@ interface ScannerProps {
 export function Scanner({ onScan, onClose }: ScannerProps) {
   const [error, setError] = useState<string | null>(null);
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
+  const [cameraActive, setCameraActive] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const isHandlingScan = useRef(false);
 
@@ -33,14 +34,15 @@ export function Scanner({ onScan, onClose }: ScannerProps) {
           (decodedText) => {
             if (isHandlingScan.current) return;
             isHandlingScan.current = true;
-            
+
             // Immediately attempt to stop to avoid double scanning or UI lag
             onScan(decodedText);
             stopScanner();
           },
-          () => {} // Quietly ignore frame errors
+          () => { } // Quietly ignore frame errors
         );
         setHasCameraPermission(true);
+        setCameraActive(true);
       } catch (err) {
         console.error('Scanner start error:', err);
         setError('Camera access failed. Check browser permissions.');
@@ -64,13 +66,48 @@ export function Scanner({ onScan, onClose }: ScannerProps) {
         console.error('Stop scanner error:', err);
       }
     }
+
+    try {
+      const container = document.getElementById('qr-reader');
+      if (container) {
+        const videos = container.querySelectorAll('video');
+        videos.forEach((video) => {
+          // @ts-ignore
+          const stream: MediaStream | null = video.srcObject as MediaStream | null;
+          if (stream && typeof stream.getTracks === 'function') {
+            stream.getTracks().forEach((track) => {
+              try { track.stop(); } catch (e) { /* ignore */ }
+            });
+          }
+          try {
+            // @ts-ignore
+            video.srcObject = null;
+            // also clear src in case a blob URL was used
+            // @ts-ignore
+            video.removeAttribute('src');
+            // @ts-ignore
+            video.load && video.load();
+          } catch (e) {
+            // ignore
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Error while stopping media tracks:', err);
+    }
+
+    setCameraActive(false);
+    setHasCameraPermission(false);
   };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-4">
       <div className="relative w-full max-w-md bg-muted rounded-2xl overflow-hidden border-4 border-secondary shadow-2xl aspect-square">
         <div id="qr-reader" className="w-full h-full" />
-        
+        <div className="absolute top-3 right-3 z-50 rounded-full px-3 py-1 text-xs font-bold text-white/90 bg-black/50">
+          {cameraActive ? 'Camera active' : 'Camera off'}
+        </div>
+
         {(!hasCameraPermission && !error) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white p-6 text-center">
             <Camera className="w-12 h-12 mb-4 animate-pulse" />
@@ -97,13 +134,13 @@ export function Scanner({ onScan, onClose }: ScannerProps) {
         Align Mezo QR code within the frame
       </p>
 
-      <Button 
-        onClick={onClose} 
-        variant="ghost" 
+      <Button
+        onClick={onClose}
+        variant="ghost"
         className="mt-8 text-white hover:bg-white/10"
       >
         <X className="mr-2 h-4 w-4" /> Cancel
       </Button>
-    </div>
+    </div >
   );
 }

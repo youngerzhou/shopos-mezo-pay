@@ -15,4 +15,3 @@ export const useLoading = create<LoadingState>((set) => ({
   start: (message) => set({ isLoading: true, message }),
   stop: () => set({ isLoading: false, message: null }),
 }));
-```

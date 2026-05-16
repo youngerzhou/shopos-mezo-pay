@@ -1,11 +1,34 @@
 @import "tailwindcss";
-/* @import "tw-animate-css"; */
 
-@theme {
-  --color-primary: #ff5733;
-  --color-secondary: #33ff57;
+@layer base {
+  :root {
+    --color-primary: #ff5733;
+    --color-secondary: #33ff57;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900;
+  }
 }
 
-body {
-  @apply bg-slate-50 text-slate-900;
+@media print {
+  body {
+    background: white;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .pos-receipt-screen {
+    min-height: auto;
+    background: white;
+    padding: 0;
+  }
+
+  .receipt-print {
+    width: 320px;
+    max-width: 320px;
+    box-shadow: none !important;
+  }
 }

@@ -43,6 +43,17 @@ export const SCHEMA_DEFINITION = {
     identity_verified: "BOOLEAN DEFAULT FALSE", // Track blockchain identity verification
     identity_signature: "TEXT", // Store wallet identity signature returned by MetaMask
     verified_at: "TIMESTAMP", // When identity was verified
+    total_spent: "DECIMAL NOT NULL DEFAULT 0",
+    created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+  },
+  member_levels: {
+    id: "TEXT PRIMARY KEY",
+    level_code: "TEXT UNIQUE NOT NULL",
+    level_name: "TEXT NOT NULL",
+    min_spend_amount: "DECIMAL NOT NULL DEFAULT 0",
+    discount_rate: "DECIMAL NOT NULL DEFAULT 0",
+    sort_order: "INTEGER NOT NULL DEFAULT 0",
+    is_active: "BOOLEAN DEFAULT TRUE",
     created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
   },
   staff: {
@@ -81,6 +92,51 @@ export const SCHEMA_DEFINITION = {
     onchain_amount: "TEXT",
     error_message: "TEXT",
     created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+  },
+  products: {
+    id: "TEXT PRIMARY KEY",
+    barcode: "TEXT UNIQUE NOT NULL",
+    sku: "TEXT UNIQUE NOT NULL",
+    name: "TEXT NOT NULL",
+    category: "TEXT",
+    brand: "TEXT",
+    color: "TEXT",
+    size: "TEXT",
+    price: "DECIMAL NOT NULL",
+    currency: "TEXT NOT NULL DEFAULT 'MUSD'",
+    stock_qty: "INTEGER NOT NULL DEFAULT 0",
+    image_url: "TEXT",
+    is_active: "BOOLEAN DEFAULT TRUE",
+    created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+  },
+  pos_orders: {
+    id: "TEXT PRIMARY KEY",
+    order_no: "TEXT UNIQUE NOT NULL",
+    shop_id: "TEXT",
+    customer_referral_id: "TEXT",
+    customer_wallet: "TEXT",
+    passport_level: "INTEGER DEFAULT 1",
+    member_level_code: "TEXT",
+    member_level_name: "TEXT",
+    member_discount_rate: "DECIMAL DEFAULT 0",
+    subtotal: "DECIMAL NOT NULL DEFAULT 0",
+    discount_amount: "DECIMAL NOT NULL DEFAULT 0",
+    total_amount: "DECIMAL NOT NULL DEFAULT 0",
+    currency: "TEXT NOT NULL DEFAULT 'MUSD'",
+    payment_status: "TEXT NOT NULL DEFAULT 'pending'",
+    payment_tx_hash: "TEXT",
+    created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+  },
+  pos_order_items: {
+    id: "TEXT PRIMARY KEY",
+    order_id: "TEXT NOT NULL",
+    product_id: "TEXT NOT NULL",
+    barcode: "TEXT NOT NULL",
+    product_name: "TEXT NOT NULL",
+    qty: "INTEGER NOT NULL DEFAULT 1",
+    unit_price: "DECIMAL NOT NULL",
+    discount_amount: "DECIMAL NOT NULL DEFAULT 0",
+    line_total: "DECIMAL NOT NULL"
   }
 };
 

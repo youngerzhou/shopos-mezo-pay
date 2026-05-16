@@ -26,6 +26,42 @@ export interface Transaction {
 
 export type Order = Transaction;
 
+export interface PosOrderItemInput {
+  barcode: string;
+  qty: number;
+}
+
+export interface CreatePosOrderPayload {
+  shopId?: string;
+  customerReferralId?: string;
+  customerWallet?: string;
+  passportLevel?: 0 | 1 | 2 | 3;
+  currency?: string;
+  items: PosOrderItemInput[];
+}
+
+export interface MemberLevel {
+  id: string;
+  level_code: string;
+  level_name: string;
+  min_spend_amount: number;
+  discount_rate: number;
+  sort_order: number;
+  is_active: boolean;
+  created_at?: any;
+}
+
+export interface CustomerMembership {
+  referral_id: string;
+  username: string | null;
+  total_spent: number;
+  level: number;
+  level_code: string;
+  level_name: string;
+  discount_rate: number;
+  min_spend_amount: number;
+}
+
 /**
  * Global variable to hold the SQL client instance (singleton).
  */
@@ -44,18 +80,29 @@ export const getSql = () => {
     }
     throw new Error('DATABASE_URL is not defined in environment variables');
   }
-  
+
   cachedSql = neon(url);
   return cachedSql;
 };
 
-export let initialized = false;
+let initPromise: Promise<void> | null = null;
 
 export async function ensureDb() {
-  if (!initialized) {
-    await initDb();
-    initialized = true;
+  if (initPromise) {
+    await initPromise;
+    return;
   }
+
+  initPromise = (async () => {
+    try {
+      await initDb();
+    } catch (error) {
+      console.error('Database initialization failed:', error);
+      throw error;
+    }
+  })();
+
+  await initPromise;
 }
 
 /**
@@ -84,41 +131,41 @@ export async function updateSetting(key: string, value: string) {
 export async function initDb() {
   const sql = getSql();
   console.log('Starting dynamic database schema sync...');
-  
+
   try {
     for (const [tableName, columns] of Object.entries(SCHEMA_DEFINITION)) {
       // 1. Create table if not exists with at least the first column
       const colNames = Object.keys(columns);
       const firstCol = colNames[0];
       const firstColDef = columns[firstCol as keyof typeof columns];
-      
+
       // Basic creation if not exists (neon() returns a query fn, not pg Pool — use sql(string), not .query())
       await sql(`CREATE TABLE IF NOT EXISTS ${tableName} (${firstCol} ${firstColDef})`);
-      
+
       // 2. Check each column and ALTER if missing
       for (const [colName, colDef] of Object.entries(columns)) {
         // Skip the first column as it's handled by CREATE TABLE
         if (colName === firstCol) continue;
-        
+
         const columnExists = await sql`
           SELECT 1 
           FROM information_schema.columns 
           WHERE table_name = ${tableName} 
           AND column_name = ${colName}
         `;
-        
+
         if (columnExists.length === 0) {
           console.log(`[Schema Sync] Adding missing column: ${colName} to ${tableName}`);
           await sql(`ALTER TABLE ${tableName} ADD COLUMN ${colName} ${colDef}`);
         }
       }
     }
-    
+
     console.log('Database schema synchronized successfully based on definition');
-    
+
     // Phase 1 FIX: Ensure wallet_address is nullable in customers table for new dual-scan workflow
     await sql(`ALTER TABLE customers ALTER COLUMN wallet_address DROP NOT NULL`);
-    
+
     // Seed a demo staff member if none exists
     const demoStaff = await sql`SELECT 1 FROM staff WHERE staff_id = 'STAFF001'`;
     if (demoStaff.length === 0) {
@@ -128,17 +175,454 @@ export async function initDb() {
         VALUES ('s1', 'demo_staff', 'hashed_pass', 'STAFF001')
       `;
     }
+
+    const memberLevels = [
+      { id: 'level_member', level_code: 'member', level_name: 'Member', min_spend_amount: 0, discount_rate: 0, sort_order: 1 },
+      { id: 'level_silver', level_code: 'silver', level_name: 'Silver', min_spend_amount: 100, discount_rate: 0.02, sort_order: 2 },
+      { id: 'level_gold', level_code: 'gold', level_name: 'Gold', min_spend_amount: 1000, discount_rate: 0.05, sort_order: 3 },
+      { id: 'level_platinum', level_code: 'platinum', level_name: 'Platinum', min_spend_amount: 5000, discount_rate: 0.08, sort_order: 4 }
+    ];
+
+    for (const level of memberLevels) {
+      await sql`
+        INSERT INTO member_levels (
+          id, level_code, level_name, min_spend_amount, discount_rate, sort_order, is_active
+        )
+        VALUES (
+          ${level.id},
+          ${level.level_code},
+          ${level.level_name},
+          ${level.min_spend_amount},
+          ${level.discount_rate},
+          ${level.sort_order},
+          TRUE
+        )
+        ON CONFLICT (level_code) DO UPDATE SET
+          level_name = EXCLUDED.level_name,
+          min_spend_amount = EXCLUDED.min_spend_amount,
+          discount_rate = EXCLUDED.discount_rate,
+          sort_order = EXCLUDED.sort_order,
+          is_active = TRUE
+      `;
+    }
+
+    const demoCustomers = [
+      { id: 'cust_demo_member', username: 'Mia Member', referral_id: 'MEM_MEMBER', level: 1, total_spent: 0 },
+      { id: 'cust_demo_silver', username: 'Sam Silver', referral_id: 'MEM_SILVER', level: 2, total_spent: 100 },
+      { id: 'cust_demo_gold', username: 'Grace Gold', referral_id: 'MEM_GOLD', level: 3, total_spent: 1000 },
+      { id: 'cust_demo_platinum', username: 'Parker Platinum', referral_id: 'MEM_PLATINUM', level: 4, total_spent: 5000 }
+    ];
+
+    for (const customer of demoCustomers) {
+      await sql`
+        INSERT INTO customers (id, username, referral_id, level, total_spent)
+        VALUES (
+          ${customer.id},
+          ${customer.username},
+          ${customer.referral_id},
+          ${customer.level},
+          ${customer.total_spent}
+        )
+        ON CONFLICT (referral_id) DO UPDATE SET
+          username = EXCLUDED.username,
+          level = EXCLUDED.level,
+          total_spent = GREATEST(customers.total_spent, EXCLUDED.total_spent)
+      `;
+    }
+
+    const demoProducts = [
+      {
+        id: 'prod_demo_tee_black_m',
+        barcode: 'SHOPOS100',
+        sku: 'MEZO-TEE-BLK-M',
+        name: 'Mezo Logo Tee',
+        category: 'Tops',
+        brand: 'ShopOS',
+        color: 'Black',
+        size: 'M',
+        price: 100,
+        stock_qty: 24,
+        image_url: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?q=80&w=600&auto=format&fit=crop'
+      },
+      {
+        id: 'prod_demo_hoodie_green_l',
+        barcode: 'SHOPOS500',
+        sku: 'MEZO-HOOD-GRN-L',
+        name: 'Passport Hoodie',
+        category: 'Outerwear',
+        brand: 'ShopOS',
+        color: 'Forest',
+        size: 'L',
+        price: 500,
+        stock_qty: 12,
+        image_url: 'https://images.unsplash.com/photo-1556821840-3a63f95609a7?q=80&w=600&auto=format&fit=crop'
+      },
+      {
+        id: 'prod_demo_jacket_silver_m',
+        barcode: 'SHOPOS1000',
+        sku: 'MEZO-JKT-SLV-M',
+        name: 'Hackathon Tech Jacket',
+        category: 'Outerwear',
+        brand: 'ShopOS',
+        color: 'Silver',
+        size: 'M',
+        price: 1000,
+        stock_qty: 8,
+        image_url: 'https://images.unsplash.com/photo-1543076447-215ad9ba6923?q=80&w=600&auto=format&fit=crop'
+      }
+    ];
+
+    for (const product of demoProducts) {
+      await sql`
+        INSERT INTO products (id, barcode, sku, name, category, brand, color, size, price, currency, stock_qty, image_url, is_active)
+        VALUES (
+          ${product.id},
+          ${product.barcode},
+          ${product.sku},
+          ${product.name},
+          ${product.category},
+          ${product.brand},
+          ${product.color},
+          ${product.size},
+          ${product.price},
+          'MUSD',
+          ${product.stock_qty},
+          ${product.image_url},
+          TRUE
+        )
+        ON CONFLICT (barcode) DO UPDATE SET
+          name = EXCLUDED.name,
+          category = EXCLUDED.category,
+          brand = EXCLUDED.brand,
+          color = EXCLUDED.color,
+          size = EXCLUDED.size,
+          price = EXCLUDED.price,
+          currency = EXCLUDED.currency,
+          stock_qty = GREATEST(products.stock_qty, EXCLUDED.stock_qty),
+          image_url = EXCLUDED.image_url,
+          is_active = TRUE
+      `;
+    }
   } catch (err) {
     console.error('Database schema synchronization failed:', err);
   }
+}
+
+export async function getMemberLevelBySpend(totalSpent: number): Promise<MemberLevel> {
+  await ensureDb();
+  const sql = getSql();
+  const spend = roundMoney2(totalSpent);
+  const results = await sql`
+    SELECT
+      id,
+      level_code,
+      level_name,
+      min_spend_amount::float,
+      discount_rate::float,
+      sort_order,
+      is_active,
+      created_at
+    FROM member_levels
+    WHERE is_active = TRUE
+    AND min_spend_amount <= ${spend}
+    ORDER BY min_spend_amount DESC, sort_order DESC
+    LIMIT 1
+  `;
+
+  return results[0] || {
+    id: 'level_member',
+    level_code: 'member',
+    level_name: 'Member',
+    min_spend_amount: 0,
+    discount_rate: 0,
+    sort_order: 1,
+    is_active: true
+  };
+}
+
+export async function getCustomerMembership(referralId: string): Promise<CustomerMembership | null> {
+  await ensureDb();
+  const sql = getSql();
+  const normalizedReferralId = referralId.trim();
+
+  const customers = await sql`
+    SELECT
+      referral_id,
+      username,
+      COALESCE(total_spent, 0)::float as total_spent,
+      COALESCE(level, 1)::int as level
+    FROM customers
+    WHERE referral_id = ${normalizedReferralId}
+    LIMIT 1
+  `;
+
+  if (customers.length === 0) return null;
+
+  const customer = customers[0];
+  const memberLevel = await getMemberLevelBySpend(Number(customer.total_spent || 0));
+
+  if (Number(customer.level) !== Number(memberLevel.sort_order)) {
+    await sql`
+      UPDATE customers
+      SET level = ${memberLevel.sort_order}
+      WHERE referral_id = ${normalizedReferralId}
+    `;
+  }
+
+  return {
+    referral_id: customer.referral_id,
+    username: customer.username || null,
+    total_spent: roundMoney2(Number(customer.total_spent || 0)),
+    level: Number(memberLevel.sort_order),
+    level_code: memberLevel.level_code,
+    level_name: memberLevel.level_name,
+    discount_rate: Number(memberLevel.discount_rate || 0),
+    min_spend_amount: Number(memberLevel.min_spend_amount || 0)
+  };
+}
+
+export async function getProductByBarcode(barcode: string) {
+  await ensureDb();
+  const sql = getSql();
+  const normalizedBarcode = barcode.trim();
+  const results = await sql`
+    SELECT
+      id,
+      barcode,
+      sku,
+      name,
+      category,
+      brand,
+      color,
+      size,
+      price::float,
+      currency,
+      stock_qty,
+      image_url,
+      is_active,
+      created_at
+    FROM products
+    WHERE barcode = ${normalizedBarcode}
+    AND is_active = TRUE
+    LIMIT 1
+  `;
+  return results[0];
+}
+
+export async function createPosOrder(payload: CreatePosOrderPayload) {
+  await ensureDb();
+  const sql = getSql();
+  const items = Array.isArray(payload.items) ? payload.items : [];
+
+  if (items.length === 0) {
+    throw new Error('Cart is empty');
+  }
+
+  const requestedPassportLevel = Number(payload.passportLevel || 0);
+  const passportLevel = ([1, 2, 3].includes(requestedPassportLevel) ? requestedPassportLevel : 0) as 0 | 1 | 2 | 3;
+  const customerReferralId = payload.customerReferralId?.trim() || null;
+  const membership = customerReferralId ? await getCustomerMembership(customerReferralId) : null;
+  if (customerReferralId && !membership) {
+    throw new Error('Member not found');
+  }
+  const discountRate = Number(membership?.discount_rate || 0);
+  const currency = payload.currency || 'MUSD';
+  const orderId = `pos_${Math.random().toString(36).substring(2, 10)}`;
+  const orderNo = `POS-${Date.now().toString(36).toUpperCase()}`;
+  const createdAt = new Date().toISOString();
+
+  let subtotal = 0;
+  let discountAmount = 0;
+  const orderItems = [];
+
+  for (const item of items) {
+    const qty = Math.max(1, Math.trunc(Number(item.qty) || 1));
+    const product = await getProductByBarcode(item.barcode);
+
+    if (!product) {
+      throw new Error(`Product not found: ${item.barcode}`);
+    }
+
+    if (Number(product.stock_qty) < qty) {
+      throw new Error(`Insufficient stock for ${product.name}. Available: ${product.stock_qty}, requested: ${qty}`);
+    }
+
+    const unitPrice = roundMoney2(Number(product.price));
+    const lineSubtotal = roundMoney2(unitPrice * qty);
+    const lineDiscount = roundMoney2(lineSubtotal * discountRate);
+    const lineTotal = roundMoney2(lineSubtotal - lineDiscount);
+
+    subtotal = roundMoney2(subtotal + lineSubtotal);
+    discountAmount = roundMoney2(discountAmount + lineDiscount);
+    orderItems.push({
+      id: `poi_${Math.random().toString(36).substring(2, 10)}`,
+      product,
+      qty,
+      unitPrice,
+      lineDiscount,
+      lineTotal
+    });
+  }
+
+  const totalAmount = roundMoney2(subtotal - discountAmount);
+  const normalizedWallet = payload.customerWallet ? payload.customerWallet.toLowerCase().trim() : null;
+
+  await sql`
+    INSERT INTO pos_orders (
+      id, order_no, shop_id, customer_referral_id, customer_wallet, passport_level,
+      member_level_code, member_level_name, member_discount_rate,
+      subtotal, discount_amount, total_amount, currency, payment_status
+    )
+    VALUES (
+      ${orderId},
+      ${orderNo},
+      ${payload.shopId || 'STORE_A'},
+      ${customerReferralId},
+      ${normalizedWallet},
+      ${passportLevel},
+      ${membership?.level_code || null},
+      ${membership?.level_name || null},
+      ${discountRate},
+      ${subtotal},
+      ${discountAmount},
+      ${totalAmount},
+      ${currency},
+      'pending'
+    )
+  `;
+
+  for (const item of orderItems) {
+    await sql`
+      INSERT INTO pos_order_items (
+        id, order_id, product_id, barcode, product_name, qty,
+        unit_price, discount_amount, line_total
+      )
+      VALUES (
+        ${item.id},
+        ${orderId},
+        ${item.product.id},
+        ${item.product.barcode},
+        ${item.product.name},
+        ${item.qty},
+        ${item.unitPrice},
+        ${item.lineDiscount},
+        ${item.lineTotal}
+      )
+    `;
+
+    await sql`
+      UPDATE products
+      SET stock_qty = stock_qty - ${item.qty}
+      WHERE id = ${item.product.id}
+    `;
+  }
+
+  return {
+    order_id: orderId,
+    order_no: orderNo,
+    created_at: createdAt,
+    total_amount: totalAmount,
+    currency,
+    member_level_code: membership?.level_code || null,
+    member_level_name: membership?.level_name || null,
+    member_discount_rate: discountRate
+  };
+}
+
+export async function markPosOrderPaid(orderId: string, txHash: string) {
+  await ensureDb();
+  const sql = getSql();
+
+  const updated = await sql`
+    UPDATE pos_orders
+    SET payment_status = 'paid',
+        payment_tx_hash = ${txHash}
+    WHERE id = ${orderId}
+    AND payment_status <> 'paid'
+    RETURNING
+      id,
+      order_no,
+      customer_referral_id,
+      total_amount::float,
+      currency,
+      payment_status,
+      payment_tx_hash
+  `;
+
+  if (updated.length === 0) {
+    const existing = await sql`
+      SELECT
+        id,
+        order_no,
+        customer_referral_id,
+        total_amount::float,
+        currency,
+        payment_status,
+        payment_tx_hash
+      FROM pos_orders
+      WHERE id = ${orderId}
+      LIMIT 1
+    `;
+
+    if (existing.length === 0) {
+      throw new Error('POS order not found');
+    }
+
+    return {
+      ...existing[0],
+      membership: existing[0].customer_referral_id
+        ? await getCustomerMembership(existing[0].customer_referral_id)
+        : null
+    };
+  }
+
+  const order = updated[0];
+  let membership = null;
+
+  if (order.customer_referral_id) {
+    const current = await sql`
+      SELECT COALESCE(total_spent, 0)::float as total_spent
+      FROM customers
+      WHERE referral_id = ${order.customer_referral_id}
+      LIMIT 1
+    `;
+
+    if (current.length > 0) {
+      const nextTotalSpent = roundMoney2(Number(current[0].total_spent || 0) + Number(order.total_amount || 0));
+      const nextLevel = await getMemberLevelBySpend(nextTotalSpent);
+
+      await sql`
+        UPDATE customers
+        SET total_spent = ${nextTotalSpent},
+            level = ${nextLevel.sort_order}
+        WHERE referral_id = ${order.customer_referral_id}
+      `;
+
+      membership = {
+        referral_id: order.customer_referral_id,
+        username: null,
+        total_spent: nextTotalSpent,
+        level: Number(nextLevel.sort_order),
+        level_code: nextLevel.level_code,
+        level_name: nextLevel.level_name,
+        discount_rate: Number(nextLevel.discount_rate || 0),
+        min_spend_amount: Number(nextLevel.min_spend_amount || 0)
+      };
+    }
+  }
+
+  return {
+    ...order,
+    membership
+  };
 }
 
 /**
  * Create a new transaction
  */
 export async function createTransaction(
-  recipient: string, 
-  amount: number = 1.0, 
+  recipient: string,
+  amount: number = 1.0,
   sender?: string,
   originalAmount?: number,
   discountRate?: number,
@@ -154,7 +638,7 @@ export async function createTransaction(
   const id = Math.random().toString(36).substring(7);
   const normalizedRecipient = recipient.toLowerCase().trim();
   const normalizedSender = sender ? sender.toLowerCase().trim() : null;
-  
+
   const finalAmount = roundMoney2(amount);
   const origAmount = roundMoney2(originalAmount ?? amount);
   const discRate = roundDiscountRate(discountRate || 0);
@@ -188,10 +672,10 @@ export async function createTransaction(
  * Compatibility alias for createOrder
  */
 export async function createOrder(
-  walletAddress: string, 
-  amount: number = 1.0, 
-  senderOrRecipient?: string, 
-  originalAmount?: number, 
+  walletAddress: string,
+  amount: number = 1.0,
+  senderOrRecipient?: string,
+  originalAmount?: number,
   discountRate?: number,
   passportLevel?: number,
   referralId?: string,
@@ -219,7 +703,7 @@ export async function createCustomer(referral_id: string, level: number = 1, ref
   const sql = getSql();
   const id = Math.random().toString(36).substring(7);
   const normalizedWallet = wallet_address ? wallet_address.toLowerCase().trim() : null;
-  
+
   const results = await sql`
     INSERT INTO customers (id, wallet_address, referral_id, level, referred_by_staff_id)
     VALUES (${id}, ${normalizedWallet}, ${referral_id}, ${level}, ${referred_by_staff_id})
@@ -236,7 +720,7 @@ export async function bindWalletToCustomer(referral_id: string, wallet_address: 
   await ensureDb();
   const sql = getSql();
   const normalizedWallet = wallet_address.toLowerCase().trim();
-  
+
   const results = await sql`
     UPDATE customers 
     SET wallet_address = ${normalizedWallet}
@@ -417,7 +901,7 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
 
   if (results[0]) {
     console.log('ORDER_UPDATED_SUCCESSFULLY: ' + hash);
-    
+
     // Auto-Bind Logic
     const tx = results[0];
     if (tx.sender) {

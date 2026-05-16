@@ -72,13 +72,10 @@ export function ContractInteraction({
       return;
     }
 
-    // 🔒 SECURITY: Enforce ALLOWANCE_TIERS whitelist for amount.
-    // This defends against malicious or misconfigured parent components.
-    // Valid tiers: [100, 500, 1000] MUSD (matches src/app/register/page.tsx & backend logic)
-    const VALID_TIERS = [100, 500, 1000] as const;
-    if (!VALID_TIERS.includes(amount as any)) {
-      onError(`Invalid payment amount: ${amount}. Must be one of [${VALID_TIERS.join(', ')}]`);
-      console.error('[ContractInteraction] Rejected non-whitelisted amount:', { amount, validTiers: [...VALID_TIERS] });
+    const roundedAmount = roundMoney2(amount);
+    if (roundedAmount <= 0) {
+      onError(`Invalid payment amount: ${amount}.`);
+      console.error('[ContractInteraction] Rejected non-positive amount:', { amount });
       return;
     }
 
@@ -87,7 +84,7 @@ export function ContractInteraction({
       await switchChain({ chainId: mezoTestnet.id });
 
       // Human MUSD (2dp) → exact uint256 wei at 18 decimals
-      const amountInUnits = parseUnits(roundMoney2(amount).toFixed(2), 18);
+      const amountInUnits = parseUnits(roundedAmount.toFixed(2), 18);
 
       writeContract({
         address: MUSD_ADDRESS as `0x${string}`,

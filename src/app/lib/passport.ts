@@ -17,9 +17,9 @@ export function getPassportLevel(address: string): 1 | 2 | 3 {
  * Discount Mapping based on Mezo Passport Levels
  */
 export const PASSPORT_DISCOUNTS = {
-  1: { rate: 0.05, label: "5% OFF (95折)" },
-  2: { rate: 0.10, label: "10% OFF (9折)" },
-  3: { rate: 0.12, label: "12% OFF (88折)" },
+  1: { rate: 0.05, label: "5% OFF" },
+  2: { rate: 0.10, label: "10% OFF" },
+  3: { rate: 0.12, label: "12% OFF" },
 } as const;
 
 export function calculateDiscountedPrice(originalPrice: number, level: 1 | 2 | 3) {
