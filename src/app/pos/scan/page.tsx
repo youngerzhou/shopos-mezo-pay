@@ -328,18 +328,24 @@ export default function ShoposHome() {
       if (!mezoRes.ok) throw new Error(mezoData.error || 'Payment flow failed');
 
       if (mezoData.fast_pay_triggered) {
-        if (mezoData.transaction_hash) {
-          setPaymentTxHash(mezoData.transaction_hash);
-          const posPaidRes = await fetch('/api/pos/orders', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ order_id: posData.order_id, tx_hash: mezoData.transaction_hash })
-          });
-          if (posPaidRes.ok) {
-            const posPaidData = await posPaidRes.json();
-            if (posPaidData.membership) setMembership(posPaidData.membership);
-          }
+        if (!mezoData.transaction_hash) {
+          throw new Error('Fast Pay completed without a transaction hash.');
         }
+
+        setPaymentTxHash(mezoData.transaction_hash);
+        const posPaidRes = await fetch('/api/pos/orders', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order_id: posData.order_id, tx_hash: mezoData.transaction_hash })
+        });
+
+        if (!posPaidRes.ok) {
+          throw new Error('Payment succeeded on-chain, but POS order finalization failed.');
+        }
+
+        const posPaidData = await posPaidRes.json();
+        if (posPaidData.membership) setMembership(posPaidData.membership);
+
         setIsPaid(true);
         setShowReceipt(true);
         toast({ title: 'Fast Pay Complete', description: `${posData.order_no} paid with existing Mezo flow.` });
