@@ -10,6 +10,7 @@ import {
 } from 'wagmi';
 import { parseUnits } from 'viem';
 import { roundMoney2 } from '@/app/lib/money';
+import { formatMUSD } from '@/lib/money';
 import { Button } from '@/components/ui/button';
 import { RefreshCw, CheckCircle2, AlertCircle, Wallet } from 'lucide-react';
 import { mezoTestnet, MUSD_ADDRESSES } from '@/app/lib/mezo-config';
@@ -141,7 +142,7 @@ export function ContractInteraction({
           ) : (
             <>
               <CheckCircle2 className="w-5 h-5" />
-              Pay {amount.toFixed(2)} MUSD
+              Pay {formatMUSD(amount)}
             </>
           )}
         </Button>

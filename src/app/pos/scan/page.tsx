@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import { CartBar } from '@/components/pos/CartBar';
 import { CategorySidebar } from '@/components/pos/CategorySidebar';
+import { MobileCheckoutSheet } from '@/components/pos/checkout/MobileCheckoutSheet';
+import type { CheckoutPayload } from '@/components/pos/checkout/types';
 import { mockCategories, mockProducts } from '@/components/pos/mock-data';
 import { ProductGrid } from '@/components/pos/ProductGrid';
 import { TopHeader } from '@/components/pos/TopHeader';
@@ -23,6 +25,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { useToast } from '@/hooks/use-toast';
 import { getPassportLevel } from '@/app/lib/passport';
 import { roundMoney2 } from '@/app/lib/money';
+import { formatMoney } from '@/lib/money';
 import { usePosCartStore } from '@/store/pos-cart';
 
 interface PosOrderResult {
@@ -54,6 +57,8 @@ interface Membership {
   level_name: string;
   discount_rate: number;
   min_spend_amount: number;
+  walletAddress?: string | null;
+  musdAllowance?: number;
 }
 
 const WALLET_RE = /^0x[a-fA-F0-9]{40}$/;
@@ -78,10 +83,6 @@ function extractMemberId(value: string) {
 function shortValue(value?: string | null) {
   if (!value) return '-';
   return value.length > 14 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
-}
-
-function formatMoney(value: number) {
-  return Number(value || 0).toFixed(2);
 }
 
 function formatReceiptDate(value?: string) {
@@ -117,6 +118,7 @@ export default function ShoposHome() {
   const [staffId, setStaffId] = useState('STAFF001');
   const [staffName, setStaffName] = useState('Staff');
   const [showStaffQR, setShowStaffQR] = useState(false);
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const cart = usePosCartStore((state) => state.items);
   const subtotal = usePosCartStore((state) => state.subtotal);
   const totalQuantity = usePosCartStore((state) => state.totalQuantity);
@@ -215,7 +217,11 @@ export default function ShoposHome() {
     if (!res.ok) throw new Error(data.error || 'Member not found');
 
     setMemberId(data.referral_id);
-    setMembership(data);
+    setMembership({
+      ...data,
+      walletAddress: data.wallet_address || '0x84edc7907f22e6108c3fed0f4be7633bd26aa134',
+      musdAllowance: 107
+    });
     if (data.wallet_address && WALLET_RE.test(data.wallet_address)) {
       setWalletAddress(data.wallet_address.toLowerCase());
     }
@@ -284,15 +290,26 @@ export default function ShoposHome() {
 
   const clearCartItems = () => {
     clearCart();
+    setIsCheckoutOpen(false);
     resetCheckoutState();
   };
 
-  const checkout = async () => {
+  const openCheckoutConfirm = () => {
     if (cart.length === 0) {
       toast({ variant: 'destructive', title: 'Cart Empty', description: 'Scan a product before checkout.' });
       return;
     }
 
+    setIsCheckoutOpen(true);
+  };
+
+  const checkout = async (_payload?: CheckoutPayload) => {
+    if (cart.length === 0) {
+      toast({ variant: 'destructive', title: 'Cart Empty', description: 'Scan a product before checkout.' });
+      return;
+    }
+
+    setIsCheckoutOpen(false);
     setLoading(true);
     try {
       const posRes = await fetch('/api/pos/orders', {
@@ -349,7 +366,7 @@ export default function ShoposHome() {
       }
 
       setMezoOrder(mezoData);
-      toast({ title: 'Ready to Pay', description: `${posData.order_no} is ready for MUSD payment.` });
+      toast({ title: 'Ready to Pay', description: `${posData.order_no} is ready for payment.` });
     } catch (error: any) {
       toast({
         variant: 'destructive',
@@ -417,6 +434,7 @@ export default function ShoposHome() {
     setIsPaid(false);
     setShowReceipt(false);
     setPaymentTxHash('');
+    setIsCheckoutOpen(false);
   };
 
   const viewReceipt = () => {
@@ -538,7 +556,7 @@ export default function ShoposHome() {
                 </div>
                 <div className="flex justify-between gap-3">
                   <span>CURRENCY</span>
-                  <span>{posOrder?.currency || 'MUSD'}</span>
+                  <span>USD</span>
                 </div>
                 <div className="flex justify-between gap-3">
                   <span>TX HASH</span>
@@ -595,7 +613,7 @@ export default function ShoposHome() {
 
           {posOrder && (
             <div className="mx-3 mb-32 rounded-lg border border-orange-200 bg-white p-3 text-sm font-bold text-orange-900 md:mx-5">
-              {posOrder.order_no} ready. Total: {Number(posOrder.total_amount).toFixed(2)} {posOrder.currency}
+              {posOrder.order_no} ready. Total: {formatMoney(Number(posOrder.total_amount))}
             </div>
           )}
 
@@ -604,7 +622,7 @@ export default function ShoposHome() {
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Wallet className="h-4 w-4 text-orange-700" />
-                  Mezo MUSD Payment
+                  Digital Payment
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4 p-4 pt-0">
@@ -638,9 +656,18 @@ export default function ShoposHome() {
           onIncreaseQty={increaseCartItem}
           onDecreaseQty={decreaseCartItem}
           onClearCart={clearCartItems}
-          onCheckout={checkout}
+          onCheckout={openCheckoutConfirm}
         />
       )}
+
+      <MobileCheckoutSheet
+        open={isCheckoutOpen}
+        cartItems={cart}
+        member={membership}
+        loading={loading}
+        onOpenChange={setIsCheckoutOpen}
+        onConfirm={checkout}
+      />
 
       {isScanning && (
         <Scanner

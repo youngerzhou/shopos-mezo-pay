@@ -1,6 +1,7 @@
 import { PackagePlus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { formatMoney } from '@/lib/money';
 import type { Product } from './types';
 
 interface ProductGridProps {
@@ -61,10 +62,7 @@ export function ProductGrid({ products, searchValue, onSearchChange, onAddProduc
                 <div className="flex items-end justify-between gap-2">
                   <div>
                     <p className="text-lg font-black text-orange-700 group-hover:text-orange-200">
-                      {Number(product.price).toFixed(2)}
-                    </p>
-                    <p className="text-[10px] font-black uppercase text-slate-400 group-hover:text-orange-100">
-                      {product.currency}
+                      {formatMoney(Number(product.price))}
                     </p>
                   </div>
                   <Button

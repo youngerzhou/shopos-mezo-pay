@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { BadgePercent, ChevronDown, ChevronUp, Minus, Plus, RefreshCw, ShoppingCart, Trash2, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { roundMoney2 } from '@/app/lib/money';
+import { formatMoney } from '@/lib/money';
 import type { CartItem } from './types';
 
 interface CartBarProps {
@@ -51,19 +52,19 @@ export function CartBar({
           <div className="hidden items-center gap-5 text-right md:flex">
             <div>
               <p className="text-xs font-bold text-slate-500">Subtotal</p>
-              <p className="font-black">{subtotal.toFixed(2)} MUSD</p>
+              <p className="font-black">{formatMoney(subtotal)}</p>
             </div>
             <div>
               <p className="flex items-center justify-end gap-1 text-xs font-bold text-slate-500">
                 <BadgePercent className="h-3.5 w-3.5 text-orange-700" />
                 Discount
               </p>
-              <p className="font-black text-orange-700">-{discount.toFixed(2)} MUSD</p>
+              <p className="font-black text-orange-700">-{formatMoney(discount)}</p>
             </div>
           </div>
           <div className="text-right">
             <p className="text-xs font-bold text-slate-500">Total</p>
-            <p className="text-2xl font-black text-slate-950">{total.toFixed(2)}</p>
+            <p className="text-2xl font-black text-slate-950">{formatMoney(total)}</p>
           </div>
           <Button
             variant="outline"
@@ -95,9 +96,9 @@ export function CartBar({
 
         <div className="grid grid-cols-2 gap-2 rounded-lg bg-orange-50 px-3 py-2 text-sm font-black md:hidden">
           <div className="text-slate-500">Subtotal</div>
-          <div className="text-right">{subtotal.toFixed(2)} MUSD</div>
+          <div className="text-right">{formatMoney(subtotal)}</div>
           <div className="text-slate-500">Discount</div>
-          <div className="text-right text-orange-700">-{discount.toFixed(2)} MUSD</div>
+          <div className="text-right text-orange-700">-{formatMoney(discount)}</div>
         </div>
 
         {isExpanded && (
@@ -117,7 +118,7 @@ export function CartBar({
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-black">{item.product.name}</p>
-                    <p className="text-xs font-bold text-slate-500">{lineTotal.toFixed(2)} MUSD</p>
+                    <p className="text-xs font-bold text-slate-500">{formatMoney(lineTotal)}</p>
                   </div>
                   <div className="flex items-center gap-1">
                     <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg border-orange-200 hover:bg-red-950 hover:text-white" onClick={() => onDecreaseQty(item.product.id)}>
