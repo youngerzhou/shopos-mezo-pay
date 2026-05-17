@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { updateTransactionByRecipient, logWebhook } from '@/app/lib/db';
 import { roundMoney2 } from '@/app/lib/money';
+import { processMusdOrderPaidWebhook } from '@/app/lib/musd-payment-webhook';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -42,6 +43,31 @@ export async function POST(req: NextRequest) {
     
     // Save raw payload (essential for debug)
     await logWebhook(payload);
+
+    const musdResult = await processMusdOrderPaidWebhook(payload);
+    if (musdResult.handled) {
+      if (musdResult.errors.length > 0 && musdResult.confirmed.length === 0) {
+        console.error('[OrderPaid webhook] Unable to confirm payment intent:', musdResult.errors.join('; '));
+        return NextResponse.json({
+          success: false,
+          processed: 0,
+          errors: musdResult.errors
+        }, {
+          status: 400,
+          headers: { 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+
+      return NextResponse.json({
+        success: musdResult.errors.length === 0,
+        processed: musdResult.confirmed.length,
+        confirmed: musdResult.confirmed.map((intent) => intent.id),
+        errors: musdResult.errors
+      }, {
+        status: 200,
+        headers: { 'Access-Control-Allow-Origin': '*' }
+      });
+    }
 
     // Normalize events
     let events: any[] = [];

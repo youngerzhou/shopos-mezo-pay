@@ -175,24 +175,35 @@ export function MobileCheckoutSheet({
     onConfirm(checkoutPayload);
   };
 
-  const submitMusdScanToPay = (qrPayload: string) => {
-    const qrPaymentPayload = {
+  const submitMusdScanToPay = (intent: {
+    paymentIntentId: string;
+    orderId: string;
+    amountUsd: number;
+    amountMUSD: number;
+    network: 'mezo-testnet';
+    merchantWallet: string;
+    payerWallet?: string;
+    txHash?: string;
+  }) => {
+    const paymentDetails = {
       method: 'musd_scan_to_pay',
       paymentFlow: 'customer_scan_qr',
       settlementToken: 'MUSD',
-      amountUsd: finalTotal,
-      amountMUSD: finalTotal,
+      amountUsd: intent.amountUsd,
+      amountMUSD: intent.amountMUSD,
       network: 'Mezo Testnet',
-      merchant: 'SHOPOS',
-      qrPayload,
-      status: 'manually_confirmed'
+      merchantWallet: intent.merchantWallet,
+      paymentIntentId: intent.paymentIntentId,
+      orderId: intent.orderId,
+      payerWallet: intent.payerWallet,
+      txHash: intent.txHash,
+      confirmationSource: 'goldsky_webhook'
     };
-    console.log('qrPaymentPayload', qrPaymentPayload);
     const checkoutPayload = createCheckoutPayload('single', [{
       method: 'musd_scan_to_pay',
-      amountUsd: finalTotal,
-      amountMUSD: finalTotal
-    }], qrPaymentPayload);
+      amountUsd: intent.amountUsd,
+      amountMUSD: intent.amountMUSD
+    }], paymentDetails);
     console.log('checkoutPayload', checkoutPayload);
     setActiveSheet(null);
     onConfirm(checkoutPayload);
@@ -355,8 +366,11 @@ export function MobileCheckoutSheet({
       <MusdQrPaymentSheet
         open={activeSheet === 'musdQrPayment'}
         amountDue={finalTotal}
+        cartItems={cartItems}
+        member={member}
+        salesperson={salesperson}
         onOpenChange={(nextOpen) => setActiveSheet(nextOpen ? 'musdQrPayment' : 'payment')}
-        onMarkPaid={submitMusdScanToPay}
+        onConfirmed={submitMusdScanToPay}
       />
       <SplitPaymentSheet
         open={activeSheet === 'splitPayment'}
