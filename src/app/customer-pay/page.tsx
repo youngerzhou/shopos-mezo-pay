@@ -207,9 +207,10 @@ function CustomerPayContent() {
   const [loadingBalances, setLoadingBalances] = useState(false);
   const [needsApproval, setNeedsApproval] = useState(false);
   const [tokenDiagnostics, setTokenDiagnostics] = useState<TokenDiagnostics>(emptyDiagnostics);
+  const [lastWriteError, setLastWriteError] = useState('');
   const [walletDebug, setWalletDebug] = useState({
     isMobile: 'unknown',
-    hasEthereum: 'unknown',
+    hasWindowEthereum: 'unknown',
     walletConnectProjectIdPresent: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() ? 'yes' : 'no'
   });
 
@@ -238,6 +239,11 @@ function CustomerPayContent() {
     if (!connectors.length) return '-';
     return connectors.map((item) => `${item.name} (${item.id})`).join(', ');
   }, [connectors]);
+  const writeConnectorReady = Boolean(isConnected && address && connector && typeof writeContractAsync === 'function');
+  const metaMaskDeepLink = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    return `https://metamask.app.link/dapp/${window.location.href.replace(/^https?:\/\//, '')}`;
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -246,7 +252,7 @@ function CustomerPayContent() {
     const hasEthereum = Boolean((window as any).ethereum);
     const nextDebug = {
       isMobile: isMobile ? 'yes' : 'no',
-      hasEthereum: hasEthereum ? 'yes' : 'no',
+      hasWindowEthereum: hasEthereum ? 'yes' : 'no',
       walletConnectProjectIdPresent: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() ? 'yes' : 'no'
     };
     setWalletDebug(nextDebug);
@@ -258,9 +264,11 @@ function CustomerPayContent() {
         type: item.type
       })),
       selectedConnector: connector ? `${connector.name} (${connector.id})` : '-',
-      connectionErrorMessage: connectError?.message || '-'
+      connectionErrorMessage: connectError?.message || '-',
+      writeConnectorReady: writeConnectorReady ? 'yes' : 'no',
+      lastWriteError: lastWriteError || '-'
     });
-  }, [connectError?.message, connector, connectors]);
+  }, [connectError?.message, connector, connectors, lastWriteError, writeConnectorReady]);
 
   const amountInUnits = useMemo(() => {
     try {
@@ -593,7 +601,7 @@ function CustomerPayContent() {
     setError('');
     console.log('[WalletConnectDebug] connect wallet clicked', {
       isMobile: walletDebug.isMobile,
-      hasEthereum: walletDebug.hasEthereum,
+      hasWindowEthereum: walletDebug.hasWindowEthereum,
       walletConnectProjectIdPresent: walletDebug.walletConnectProjectIdPresent,
       availableConnectors: connectors.map((item) => ({
         id: item.id,
@@ -601,7 +609,8 @@ function CustomerPayContent() {
         type: item.type
       })),
       selectedConnector: connector ? `${connector.name} (${connector.id})` : '-',
-      connectionErrorMessage: connectError?.message || '-'
+      connectionErrorMessage: connectError?.message || '-',
+      writeConnectorReady: writeConnectorReady ? 'yes' : 'no'
     });
 
     if (typeof show === 'function') {
@@ -621,8 +630,42 @@ function CustomerPayContent() {
     }
   };
 
+  const openInMetaMask = () => {
+    console.log('[WalletConnectDebug] open in MetaMask clicked', {
+      isMobile: walletDebug.isMobile,
+      hasWindowEthereum: walletDebug.hasWindowEthereum,
+      deeplink: metaMaskDeepLink,
+      currentUrl: typeof window !== 'undefined' ? window.location.href : '-'
+    });
+    if (metaMaskDeepLink) window.location.href = metaMaskDeepLink;
+  };
+
+  const requireWriteConnector = () => {
+    if (writeConnectorReady) return true;
+    const message = 'Wallet is not connected for signing. Please connect using MetaMask app browser or WalletConnect.';
+    setLastWriteError(message);
+    setError(message);
+    console.warn('[WalletConnectDebug] write blocked: no signer connector', {
+      isMobile: walletDebug.isMobile,
+      hasWindowEthereum: walletDebug.hasWindowEthereum,
+      wagmiIsConnected: isConnected ? 'yes' : 'no',
+      connectedAddress: address || '-',
+      connector: connector ? `${connector.name} (${connector.id})` : '-',
+      availableConnectors: connectors.map((item) => ({
+        id: item.id,
+        name: item.name,
+        type: item.type
+      })),
+      walletConnectProjectIdPresent: walletDebug.walletConnectProjectIdPresent,
+      writeConnectorReady: 'no'
+    });
+    return false;
+  };
+
   const approveMusd = async () => {
     setError('');
+    setLastWriteError('');
+    if (!requireWriteConnector()) return;
     if (missingEnv.length > 0) {
       setError(`Missing environment configuration: ${missingEnv.join(', ')}.`);
       return;
@@ -657,12 +700,16 @@ function CustomerPayContent() {
       });
     } catch (err: any) {
       setStep('idle');
-      setError(err.message?.toLowerCase().includes('rejected') ? 'Transaction cancelled.' : err.message || 'Approve transaction failed.');
+      const message = err.message?.toLowerCase().includes('rejected') ? 'Transaction cancelled.' : err.message || 'Approve transaction failed.';
+      setLastWriteError(message);
+      setError(message);
     }
   };
 
   const payOrder = async () => {
     setError('');
+    setLastWriteError('');
+    if (!requireWriteConnector()) return;
     if (missingEnv.length > 0) {
       setError(`Missing environment configuration: ${missingEnv.join(', ')}.`);
       return;
@@ -714,19 +761,24 @@ function CustomerPayContent() {
       });
     } catch (err: any) {
       setStep('idle');
-      setError(err.message?.toLowerCase().includes('rejected') ? 'Transaction cancelled.' : err.message || 'Payment transaction failed.');
+      const message = err.message?.toLowerCase().includes('rejected') ? 'Transaction cancelled.' : err.message || 'Payment transaction failed.';
+      setLastWriteError(message);
+      setError(message);
     }
   };
 
   const primaryAction = () => {
-    if (!isConnected) return connectWallet();
+    if (!writeConnectorReady) {
+      setError('Wallet is not connected for signing. Please connect using MetaMask app browser or WalletConnect.');
+      return connectWallet();
+    }
     if (isWrongNetwork) return switchToMezo();
     if (tokenConfigInvalid || tokenAddressConfigError || hasDiagnosticsError) return undefined;
     if (!hasEnoughBalance) return undefined;
     return needsApproval ? approveMusd() : payOrder();
   };
 
-  const primaryLabel = !isConnected
+  const primaryLabel = !writeConnectorReady
     ? 'Connect Wallet'
     : isWrongNetwork
       ? 'Switch to Mezo Testnet'
@@ -750,7 +802,7 @@ function CustomerPayContent() {
     step === 'submitted' ||
     step === 'confirmed' ||
     !hasRequiredParams ||
-    (isConnected && !isWrongNetwork && (tokenConfigInvalid || !!tokenAddressConfigError || hasDiagnosticsError || !hasEnoughBalance));
+    (writeConnectorReady && !isWrongNetwork && (tokenConfigInvalid || !!tokenAddressConfigError || hasDiagnosticsError || !hasEnoughBalance));
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-5 text-slate-950">
@@ -781,6 +833,10 @@ function CustomerPayContent() {
                 </div>
               ) : null}
 
+              {isConnected && !writeConnectorReady ? (
+                <StatusBox tone="warn" text="Wallet address is visible, but no signing connector is active. Reconnect with MetaMask app browser or WalletConnect before approving." />
+              ) : null}
+
               {isConnected && !isWrongNetwork ? (
                 <div className="mb-4">
                   <Metric label="MUSD Balance" value={loadingBalances ? 'Loading...' : metricValue(balance, tokenConfigInvalid || !!tokenAddressConfigError)} />
@@ -802,7 +858,7 @@ function CustomerPayContent() {
                 </div>
               )}
 
-              {!isConnected ? (
+              {!writeConnectorReady ? (
                 <ConnectKitButton.Custom>
                   {({ show }) => (
                     <Button
@@ -829,6 +885,15 @@ function CustomerPayContent() {
                   {primaryLabel}
                 </Button>
               )}
+              {walletDebug.isMobile === 'yes' && !writeConnectorReady ? (
+                <Button
+                  className="mt-3 h-11 w-full rounded-xl border border-orange-200 bg-white text-sm font-black text-orange-700 hover:bg-orange-50"
+                  onClick={openInMetaMask}
+                  type="button"
+                >
+                  Open in MetaMask
+                </Button>
+              ) : null}
               <Button
                 className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white text-sm font-black text-slate-800 hover:bg-slate-50"
                 disabled={loadingBalances}
@@ -902,11 +967,14 @@ function CustomerPayContent() {
             <DebugRow label="connected wallet" value={tokenDiagnostics.connectedWallet || address || '-'} />
             <DebugRow label="current chainId" value={tokenDiagnostics.currentChainId || chainId?.toString() || '-'} />
             <DebugRow label="wallet debug isMobile" value={walletDebug.isMobile} />
-            <DebugRow label="wallet debug window.ethereum" value={walletDebug.hasEthereum} />
+            <DebugRow label="wallet debug window.ethereum" value={walletDebug.hasWindowEthereum} />
+            <DebugRow label="wagmi isConnected" value={isConnected ? 'yes' : 'no'} />
             <DebugRow label="WalletConnect projectId present" value={walletDebug.walletConnectProjectIdPresent} />
             <DebugRow label="available wallet connectors" value={connectorSummary} />
             <DebugRow label="selected wallet connector" value={connector ? `${connector.name} (${connector.id})` : '-'} />
+            <DebugRow label="write connector ready" value={writeConnectorReady ? 'yes' : 'no'} />
             <DebugRow label="wallet connection error" value={connectError?.message || '-'} />
+            <DebugRow label="last write error" value={lastWriteError || '-'} />
             <DebugRow label="RPC chainId" value={tokenDiagnostics.rpcChainId || '-'} />
             <DebugRow label="expected chainId" value={tokenDiagnostics.expectedChainId || String(mezoTestnet.id)} />
             <DebugRow label="RPC URL" value={tokenDiagnostics.rpcUrl || rpcUrl || '-'} />
