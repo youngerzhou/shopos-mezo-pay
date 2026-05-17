@@ -33,6 +33,8 @@ interface PosOrderResult {
   order_no: string;
   total_amount: number;
   currency: string;
+  payment_status?: string;
+  payment_tx_hash?: string;
   created_at?: string;
   member_level_code?: string | null;
   member_level_name?: string | null;
@@ -112,6 +114,7 @@ export default function ShoposHome() {
   const [isPaid, setIsPaid] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [paymentTxHash, setPaymentTxHash] = useState('');
+  const [receiptFallbackVisible, setReceiptFallbackVisible] = useState(false);
   const [posOrder, setPosOrder] = useState<PosOrderResult | null>(null);
   const [mezoOrder, setMezoOrder] = useState<MezoOrder | null>(null);
   const [merchantAddress, setMerchantAddress] = useState('0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7');
@@ -193,6 +196,7 @@ export default function ShoposHome() {
     setIsPaid(false);
     setShowReceipt(false);
     setPaymentTxHash('');
+    setReceiptFallbackVisible(false);
   };
 
   const addProduct = (product: Product) => {
@@ -295,6 +299,19 @@ export default function ShoposHome() {
   };
 
   const openCheckoutConfirm = () => {
+    if (isPaid || posOrder?.payment_status === 'paid') {
+      console.log('[POSPaymentState] blocked payment prompt for paid order', {
+        currentOrderId: posOrder?.order_id || null,
+        currentPaymentIntentId: null,
+        previousPaymentStatus: posOrder?.payment_status || 'paid',
+        newPaymentStatus: 'paid',
+        navigationTarget: 'receipt/print',
+        receiptDataExists: cart.length > 0 && posOrder ? 'yes' : 'no'
+      });
+      setReceiptFallbackVisible(true);
+      viewReceipt();
+      return;
+    }
     if (cart.length === 0) {
       toast({ variant: 'destructive', title: 'Cart Empty', description: 'Scan a product before checkout.' });
       return;
@@ -312,6 +329,22 @@ export default function ShoposHome() {
     setIsCheckoutOpen(false);
     setLoading(true);
     try {
+      const paymentDetails = payload?.paymentDetails || {};
+      const paymentMethod = String(paymentDetails.method || payload?.paymentMethod || '');
+      const confirmedQrPayment = paymentMethod === 'musd_scan_to_pay' && Boolean(paymentDetails.txHash);
+      const paymentIntentId = String(paymentDetails.paymentIntentId || paymentDetails.paymentRef || '');
+      const paymentStatusBefore = posOrder?.payment_status || (isPaid ? 'paid' : posOrder ? 'ready' : 'none');
+      console.log('[POSPaymentState] checkout started', {
+        currentOrderId: posOrder?.order_id || null,
+        currentOrderNo: posOrder?.order_no || null,
+        paymentIntentId,
+        paymentRef: paymentIntentId,
+        previousPaymentStatus: paymentStatusBefore,
+        incomingPaymentMethod: paymentMethod,
+        incomingTxHash: paymentDetails.txHash || null,
+        receiptDataExists: cart.length > 0 ? 'yes' : 'no'
+      });
+
       const posRes = await fetch('/api/pos/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -328,6 +361,57 @@ export default function ShoposHome() {
       const posData = await posRes.json();
       if (!posRes.ok) throw new Error(posData.error || 'Checkout failed');
       setPosOrder(posData);
+
+      if (confirmedQrPayment) {
+        const txHash = String(paymentDetails.txHash);
+        console.log('[POSPaymentState] QR payment confirmed before POS finalization', {
+          currentOrderId: posData.order_id,
+          currentOrderNo: posData.order_no,
+          paymentIntentId,
+          paymentRef: paymentIntentId,
+          previousPaymentStatus: paymentStatusBefore,
+          newPaymentStatus: 'confirmed',
+          txHash,
+          navigationTarget: 'receipt/print',
+          receiptDataExists: cart.length > 0 && posData ? 'yes' : 'no'
+        });
+
+        const posPaidRes = await fetch('/api/pos/orders', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order_id: posData.order_id, tx_hash: txHash })
+        });
+
+        const posPaidData = await posPaidRes.json();
+        if (!posPaidRes.ok) {
+          setReceiptFallbackVisible(true);
+          throw new Error(posPaidData.error || 'Payment confirmed, but POS order finalization failed.');
+        }
+
+        if (posPaidData.membership) setMembership(posPaidData.membership);
+        setPaymentTxHash(txHash);
+        setPosOrder({
+          ...posData,
+          payment_status: 'paid',
+          payment_tx_hash: txHash
+        });
+        setMezoOrder(null);
+        setIsPaid(true);
+        setShowReceipt(true);
+        setReceiptFallbackVisible(true);
+        console.log('[POSPaymentState] navigated to receipt', {
+          currentOrderId: posData.order_id,
+          paymentIntentId,
+          paymentRef: paymentIntentId,
+          previousPaymentStatus: paymentStatusBefore,
+          newPaymentStatus: 'paid',
+          navigationTarget: 'receipt/print',
+          receiptDataExists: cart.length > 0 && posData ? 'yes' : 'no',
+          txHash
+        });
+        toast({ title: 'Payment Complete', description: `${posData.order_no} paid with MUSD Scan to Pay.` });
+        return;
+      }
 
       const mezoRes = await fetch('/api/orders', {
         method: 'POST',
@@ -367,6 +451,15 @@ export default function ShoposHome() {
       }
 
       setMezoOrder(mezoData);
+      console.log('[POSPaymentState] order ready for customer payment', {
+        currentOrderId: posData.order_id,
+        currentOrderNo: posData.order_no,
+        paymentIntentId,
+        previousPaymentStatus: paymentStatusBefore,
+        newPaymentStatus: 'ready',
+        navigationTarget: 'payment',
+        receiptDataExists: 'no'
+      });
       toast({ title: 'Ready to Pay', description: `${posData.order_no} is ready for payment.` });
     } catch (error: any) {
       toast({
@@ -384,6 +477,16 @@ export default function ShoposHome() {
 
     setLoading(true);
     try {
+      console.log('[POSPaymentState] direct payment success received', {
+        currentOrderId: posOrder?.order_id || null,
+        currentPaymentIntentId: mezoOrder.id,
+        paymentRef: mezoOrder.id,
+        previousPaymentStatus: posOrder?.payment_status || 'payment_submitted',
+        newPaymentStatus: 'confirmed',
+        navigationTarget: 'receipt/print',
+        receiptDataExists: cart.length > 0 && posOrder ? 'yes' : 'no',
+        txHash
+      });
       const res = await fetch('/api/orders', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -411,6 +514,17 @@ export default function ShoposHome() {
       setIsPaid(true);
       setShowReceipt(true);
       setPaymentTxHash(txHash);
+      setReceiptFallbackVisible(true);
+      console.log('[POSPaymentState] direct payment navigated to receipt', {
+        currentOrderId: posOrder?.order_id || null,
+        currentPaymentIntentId: mezoOrder.id,
+        paymentRef: mezoOrder.id,
+        previousPaymentStatus: posOrder?.payment_status || 'payment_submitted',
+        newPaymentStatus: 'paid',
+        navigationTarget: 'receipt/print',
+        receiptDataExists: cart.length > 0 && posOrder ? 'yes' : 'no',
+        txHash
+      });
     } catch (error: any) {
       toast({
         variant: 'destructive',
@@ -436,6 +550,7 @@ export default function ShoposHome() {
     setShowReceipt(false);
     setPaymentTxHash('');
     setIsCheckoutOpen(false);
+    setReceiptFallbackVisible(false);
   };
 
   const viewReceipt = () => {
@@ -457,7 +572,7 @@ export default function ShoposHome() {
     };
   });
 
-  if (isPaid) {
+  if (isPaid || posOrder?.payment_status === 'paid') {
     return (
       <div className="pos-receipt-screen min-h-screen bg-slate-100 px-4 py-6 text-slate-950">
         <Toaster />
@@ -485,6 +600,11 @@ export default function ShoposHome() {
                 New Sale
               </Button>
             </div>
+            {receiptFallbackVisible ? (
+              <Button variant="outline" className="mt-3 h-11 w-full rounded-lg font-black" onClick={viewReceipt}>
+                Open receipt / Print receipt
+              </Button>
+            ) : null}
           </div>
 
           {showReceipt && (
@@ -612,7 +732,7 @@ export default function ShoposHome() {
             }}
           />
 
-          {posOrder && (
+          {posOrder && posOrder.payment_status !== 'paid' && !isPaid && (
             <div className="mx-3 mb-32 rounded-lg border border-orange-200 bg-white p-3 text-sm font-bold text-orange-900 md:mx-5">
               {posOrder.order_no} ready. Total: {formatMoney(Number(posOrder.total_amount))}
             </div>
@@ -644,7 +764,7 @@ export default function ShoposHome() {
         </main>
       </div>
 
-      {!mezoOrder && (
+      {!mezoOrder && !isPaid && posOrder?.payment_status !== 'paid' && (
         <CartBar
           cart={cart}
           subtotal={subtotal}
@@ -666,7 +786,20 @@ export default function ShoposHome() {
         cartItems={cart}
         member={membership}
         loading={loading}
-        onOpenChange={setIsCheckoutOpen}
+        onOpenChange={(nextOpen) => {
+          if (isPaid || posOrder?.payment_status === 'paid') {
+            console.log('[POSPaymentState] blocked checkout sheet reopen for paid order', {
+              currentOrderId: posOrder?.order_id || null,
+              previousPaymentStatus: posOrder?.payment_status || 'paid',
+              newPaymentStatus: 'paid',
+              navigationTarget: 'receipt/print',
+              receiptDataExists: cart.length > 0 && posOrder ? 'yes' : 'no'
+            });
+            setReceiptFallbackVisible(true);
+            return;
+          }
+          setIsCheckoutOpen(nextOpen);
+        }}
         onConfirm={checkout}
       />
 
