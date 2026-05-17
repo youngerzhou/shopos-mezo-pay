@@ -5,7 +5,6 @@ import { AlertCircle, CheckCircle2, RefreshCw, Wallet } from 'lucide-react';
 import { parseUnits, formatUnits } from 'viem';
 import {
   useAccount,
-  useConnect,
   usePublicClient,
   useSwitchChain,
   useWaitForTransactionReceipt,
@@ -14,8 +13,9 @@ import {
 import { useModal } from 'connectkit';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { mezoTestnet } from '@/app/lib/mezo-config';
+import { mezoTestnet, MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app/lib/mezo-config';
 import { formatMUSD, formatMoney } from '@/lib/money';
+import { validateTokenContract } from '@/app/lib/mezo-pull-payment';
 
 const erc20Abi = [
   {
@@ -41,6 +41,13 @@ const erc20Abi = [
     stateMutability: 'view',
     inputs: [{ name: 'account', type: 'address' }],
     outputs: [{ name: '', type: 'uint256' }]
+  },
+  {
+    name: 'symbol',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }]
   },
   {
     name: 'approve',
@@ -75,20 +82,34 @@ function shortAddress(value: string) {
   return value.length > 14 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
 }
 
+function sameAddress(a?: string, b?: string) {
+  return !!a && !!b && a.toLowerCase() === b.toLowerCase();
+}
+
+function isEvmAddress(value?: string) {
+  return !!value && /^0x[a-fA-F0-9]{40}$/.test(value);
+}
+
+function metricValue(value: number | null, invalid: boolean) {
+  if (invalid) return 'Invalid token contract configuration';
+  return value == null ? '-' : formatMUSD(value);
+}
+
 function CustomerPayContent() {
   const params = useSearchParams();
   const publicClient = usePublicClient();
   const { address, isConnected, chainId } = useAccount();
-  const { isPending: isConnecting } = useConnect();
   const { switchChain } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
   const { setOpen: setConnectModalOpen } = useModal();
 
   const [decimals, setDecimals] = useState(18);
-  const [allowance, setAllowance] = useState(0);
-  const [balance, setBalance] = useState(0);
+  const [allowance, setAllowance] = useState<number | null>(null);
+  const [balance, setBalance] = useState<number | null>(null);
   const [rawAllowance, setRawAllowance] = useState<bigint | null>(null);
   const [rawBalance, setRawBalance] = useState<bigint | null>(null);
+  const [tokenSymbol, setTokenSymbol] = useState('');
+  const [tokenConfigInvalid, setTokenConfigInvalid] = useState(false);
   const [step, setStep] = useState<Step>('idle');
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
   const [error, setError] = useState('');
@@ -101,7 +122,7 @@ function CustomerPayContent() {
   const merchant = params.get('merchant') || process.env.NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET || '';
   const amount = Number(params.get('amount') || 0);
   const network = params.get('network') || 'mezo-testnet';
-  const musdAddress = process.env.NEXT_PUBLIC_MUSD_ADDRESS || '';
+  const musdAddress = MUSD_ADDRESSES.testnet;
   const paymentContract = process.env.NEXT_PUBLIC_SHOPOS_PAYMENT_CONTRACT || '';
   const merchantEnv = process.env.NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET || '';
   const rpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL || '';
@@ -119,30 +140,77 @@ function CustomerPayContent() {
   });
 
   const missingEnv = [
-    !musdAddress ? 'NEXT_PUBLIC_MUSD_ADDRESS' : '',
+    !musdAddress ? 'NEXT_PUBLIC_MUSD_TOKEN_ADDRESS or NEXT_PUBLIC_SHOPOS_MUSD_TOKEN or NEXT_PUBLIC_MUSD_ADDRESS' : '',
     !paymentContract ? 'NEXT_PUBLIC_SHOPOS_PAYMENT_CONTRACT' : '',
     !merchantEnv ? 'NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET' : '',
     !rpcUrl ? 'NEXT_PUBLIC_SEPOLIA_RPC_URL' : ''
   ].filter(Boolean);
+  const tokenAddressConfigError = useMemo(() => {
+    if (!musdAddress) return '';
+    if (!isEvmAddress(musdAddress)) return 'MUSD token address is not a valid EVM address.';
+    if (sameAddress(musdAddress, merchantEnv) || sameAddress(musdAddress, merchant)) return 'MUSD token address matches the merchant wallet address.';
+    if (sameAddress(musdAddress, paymentContract)) return 'MUSD token address matches the ShopOS payment contract.';
+    if (sameAddress(musdAddress, SHOPOS_PULL_PAYMENT_CONTRACT)) return 'MUSD token address matches the pull payment contract.';
+    return '';
+  }, [merchant, merchantEnv, musdAddress, paymentContract]);
   const hasRequiredParams = Boolean(paymentIntentId && orderId && paymentIntentIdBytes32 && orderIdBytes32 && merchant && amount > 0);
   const isWrongNetwork = isConnected && chainId !== mezoTestnet.id;
-  const hasEnoughAllowance = allowance >= amount;
-  const hasEnoughBalance = balance >= amount;
+  const hasEnoughAllowance = allowance != null && allowance >= amount;
+  const hasEnoughBalance = balance != null && balance >= amount;
 
   const loadTokenState = useCallback(async () => {
     if (!publicClient || !address || !musdAddress || !paymentContract) return;
     setLoadingBalances(true);
     setError('');
+    setTokenConfigInvalid(false);
+    setRawAllowance(null);
+    setRawBalance(null);
+    setAllowance(null);
+    setBalance(null);
+
+    if (tokenAddressConfigError) {
+      console.error('[CustomerPay] Invalid token address wiring:', {
+        tokenAddress: musdAddress,
+        paymentContract,
+        pullPaymentContract: SHOPOS_PULL_PAYMENT_CONTRACT,
+        merchant,
+        merchantEnv,
+        chainId: chainId || mezoTestnet.id,
+        connectedWallet: address,
+        contractCallFailureReason: tokenAddressConfigError,
+      });
+      setTokenConfigInvalid(true);
+      setError('Invalid token contract configuration');
+      setLoadingBalances(false);
+      return;
+    }
 
     try {
-      const tokenDecimals = await publicClient.readContract({
-        address: musdAddress as `0x${string}`,
-        abi: erc20Abi,
-        functionName: 'decimals'
-      });
-      setDecimals(Number(tokenDecimals));
+      // Validate token contract before attempting to read data
+      const validationResult = await validateTokenContract(
+        musdAddress,
+        chainId || mezoTestnet.id,
+        address
+      );
 
-      const [rawAllowance, rawBalance] = await Promise.all([
+      if (!validationResult.isValid) {
+        console.error('[CustomerPay] Token validation failed:', {
+          tokenAddress: musdAddress,
+          chainId: chainId || mezoTestnet.id,
+          connectedWallet: address,
+          errorMessage: validationResult.errorMessage,
+        });
+        setTokenConfigInvalid(true);
+        setError('Invalid token contract configuration');
+        setLoadingBalances(false);
+        return;
+      }
+
+      // Set decimals from validation result
+      setDecimals(validationResult.decimals);
+
+      // Read allowance and balance
+      const [rawAllowance, rawBalance, symbol] = await Promise.all([
         publicClient.readContract({
           address: musdAddress as `0x${string}`,
           abi: erc20Abi,
@@ -154,19 +222,43 @@ function CustomerPayContent() {
           abi: erc20Abi,
           functionName: 'balanceOf',
           args: [address]
+        }),
+        publicClient.readContract({
+          address: musdAddress as `0x${string}`,
+          abi: erc20Abi,
+          functionName: 'symbol'
         })
       ]);
 
       setRawAllowance(rawAllowance);
       setRawBalance(rawBalance);
-      setAllowance(Number(formatUnits(rawAllowance, Number(tokenDecimals))));
-      setBalance(Number(formatUnits(rawBalance, Number(tokenDecimals))));
+      setTokenSymbol(String(symbol));
+      setAllowance(Number(formatUnits(rawAllowance, validationResult.decimals)));
+      setBalance(Number(formatUnits(rawBalance, validationResult.decimals)));
+
+      console.log('[CustomerPay] Token state loaded successfully:', {
+        tokenAddress: musdAddress,
+        chainId: chainId || mezoTestnet.id,
+        connectedWallet: address,
+        decimals: validationResult.decimals,
+        symbol: validationResult.symbol,
+        balance: formatUnits(rawBalance, validationResult.decimals),
+        allowance: formatUnits(rawAllowance, validationResult.decimals),
+      });
     } catch (err: any) {
-      setError(err.message || 'Unable to read MUSD allowance.');
+      console.error('[CustomerPay] Failed to load token state:', {
+        tokenAddress: musdAddress,
+        chainId: chainId || mezoTestnet.id,
+        connectedWallet: address,
+        contractCallFailureReason: err.shortMessage || err.message || 'Unknown error',
+        errorDetails: err,
+      });
+      setTokenConfigInvalid(true);
+      setError('Invalid token contract configuration');
     } finally {
       setLoadingBalances(false);
     }
-  }, [address, musdAddress, paymentContract, publicClient]);
+  }, [address, musdAddress, paymentContract, publicClient, chainId, tokenAddressConfigError, merchant, merchantEnv]);
 
   useEffect(() => {
     if (isConnected && !isWrongNetwork) {
@@ -204,6 +296,10 @@ function CustomerPayContent() {
       setError(`Missing environment configuration: ${missingEnv.join(', ')}.`);
       return;
     }
+    if (tokenConfigInvalid || tokenAddressConfigError) {
+      setError('Invalid token contract configuration');
+      return;
+    }
     if (!hasEnoughBalance) {
       setError('Insufficient MUSD balance.');
       return;
@@ -228,6 +324,10 @@ function CustomerPayContent() {
     setError('');
     if (missingEnv.length > 0) {
       setError(`Missing environment configuration: ${missingEnv.join(', ')}.`);
+      return;
+    }
+    if (tokenConfigInvalid || tokenAddressConfigError) {
+      setError('Invalid token contract configuration');
       return;
     }
     if (!hasEnoughBalance) {
@@ -259,6 +359,7 @@ function CustomerPayContent() {
   const primaryAction = () => {
     if (!isConnected) return connectWallet();
     if (isWrongNetwork) return switchToMezo();
+    if (tokenConfigInvalid || tokenAddressConfigError) return undefined;
     if (!hasEnoughBalance) return undefined;
     if (!hasEnoughAllowance) return approveMusd();
     return payOrder();
@@ -268,13 +369,15 @@ function CustomerPayContent() {
     ? 'Connect Wallet'
     : isWrongNetwork
       ? 'Switch to Mezo Testnet'
+      : tokenConfigInvalid || tokenAddressConfigError
+        ? 'Invalid token configuration'
       : !hasEnoughBalance
         ? 'Insufficient MUSD balance'
         : !hasEnoughAllowance
           ? 'Approve MUSD'
           : 'Pay MUSD';
 
-  const disablePrimary = isConnecting ||
+  const disablePrimary =
     loadingBalances ||
     step === 'approving' ||
     step === 'paying' ||
@@ -282,7 +385,7 @@ function CustomerPayContent() {
     step === 'submitted' ||
     step === 'confirmed' ||
     !hasRequiredParams ||
-    (isConnected && !isWrongNetwork && !hasEnoughBalance);
+    (isConnected && !isWrongNetwork && (tokenConfigInvalid || !!tokenAddressConfigError || !hasEnoughBalance));
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-5 text-slate-950">
@@ -315,20 +418,21 @@ function CustomerPayContent() {
 
               {isConnected && !isWrongNetwork ? (
                 <div className="mb-4 grid grid-cols-2 gap-2">
-                  <Metric label="MUSD Balance" value={loadingBalances ? 'Loading...' : formatMUSD(balance)} />
-                  <Metric label="Allowance" value={loadingBalances ? 'Loading...' : formatMUSD(allowance)} />
+                  <Metric label="MUSD Balance" value={loadingBalances ? 'Loading...' : metricValue(balance, tokenConfigInvalid || !!tokenAddressConfigError)} />
+                  <Metric label="Allowance" value={loadingBalances ? 'Loading...' : metricValue(allowance, tokenConfigInvalid || !!tokenAddressConfigError)} />
                 </div>
               ) : null}
 
               {isWrongNetwork ? <StatusBox tone="warn" text="Please switch to Mezo Testnet." /> : null}
-              {!isWrongNetwork && isConnected && !hasEnoughBalance ? <StatusBox tone="error" text="Insufficient MUSD balance." /> : null}
+              {!isWrongNetwork && isConnected && (tokenConfigInvalid || tokenAddressConfigError) ? <StatusBox tone="error" text="Invalid token contract configuration" /> : null}
+              {!isWrongNetwork && isConnected && !tokenConfigInvalid && !tokenAddressConfigError && balance != null && !hasEnoughBalance ? <StatusBox tone="error" text="Insufficient MUSD balance." /> : null}
 
               <Button
                 className="mt-4 h-12 w-full rounded-xl bg-orange-600 text-base font-black text-white hover:bg-red-950"
                 disabled={disablePrimary}
                 onClick={primaryAction}
               >
-                {isConnecting || loadingBalances || step === 'approving' || step === 'paying' || isConfirming ? (
+                {loadingBalances || step === 'approving' || step === 'paying' || isConfirming ? (
                   <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   <Wallet className="mr-2 h-4 w-4" />
@@ -365,14 +469,17 @@ function CustomerPayContent() {
             <DebugRow label="current chainId" value={chainId?.toString() || '-'} />
             <DebugRow label="expected chainId" value="31611" />
             <DebugRow label="MUSD contract address" value={musdAddress || '-'} />
+            <DebugRow label="MUSD symbol" value={tokenSymbol || '-'} />
+            <DebugRow label="token config error" value={tokenAddressConfigError || (tokenConfigInvalid ? 'Invalid token contract configuration' : '-')} />
             <DebugRow label="ShopOSPayment contract address" value={paymentContract || '-'} />
+            <DebugRow label="pull payment contract" value={SHOPOS_PULL_PAYMENT_CONTRACT || '-'} />
             <DebugRow label="merchant wallet" value={merchant || '-'} />
             <DebugRow label="amountInUnits" value={amountInUnits.toString()} />
             <DebugRow label="MUSD decimals" value={decimals.toString()} />
             <DebugRow label="MUSD balance raw" value={rawBalance?.toString() || '-'} />
             <DebugRow label="MUSD allowance raw" value={rawAllowance?.toString() || '-'} />
-            <DebugRow label="parsed balance" value={balance.toString()} />
-            <DebugRow label="parsed allowance" value={allowance.toString()} />
+            <DebugRow label="parsed balance" value={balance?.toString() || '-'} />
+            <DebugRow label="parsed allowance" value={allowance?.toString() || '-'} />
           </div>
         </div>
       </section>

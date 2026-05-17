@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { RefreshCw, Info, ShieldCheck, AlertTriangle, Wallet } from 'lucide-react';
 import { Toaster } from '@/components/ui/toaster';
 import { MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app/lib/mezo-config';
+import { validateTokenContract } from '@/app/lib/mezo-pull-payment';
 
 const MUSD_ADDRESS = MUSD_ADDRESSES.testnet;
 const ERC20_ALLOWANCE_ABI = [
@@ -86,6 +87,23 @@ function MembershipCardContent() {
         setAllowanceError(null);
 
         try {
+            // Validate token contract before checking allowance
+            const validationResult = await validateTokenContract(
+                MUSD_ADDRESS,
+                31611, // mezoTestnet.id
+                targetAddress
+            );
+
+            if (!validationResult.isValid) {
+                console.error('[MembershipCard] Token validation failed:', {
+                    tokenAddress: MUSD_ADDRESS,
+                    chainId: 31611,
+                    connectedWallet: targetAddress,
+                    errorMessage: validationResult.errorMessage,
+                });
+                throw new Error(`Invalid token contract configuration: ${validationResult.errorMessage}`);
+            }
+
             const token = await getTokenContract(false);
             const decimals = Number(await token.decimals());
             const allowanceBefore = await token.allowance(targetAddress, SHOPOS_PULL_PAYMENT_CONTRACT) as bigint;

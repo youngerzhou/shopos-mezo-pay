@@ -36,6 +36,7 @@ import {
 import { ConnectKitButton, useModal } from 'connectkit';
 import { getAddress, isAddress, parseUnits, maxUint256 } from 'viem';
 import { mezoTestnet, MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app/lib/mezo-config';
+import { validateTokenContract } from '@/app/lib/mezo-pull-payment';
 
 const MUSD_ADDRESS = MUSD_ADDRESSES.testnet;
 const ALLOWANCE_TIERS = [
@@ -302,6 +303,25 @@ function RegisterContent() {
     setWalletGuidance(`Confirm approval for ${amountLabel} in your wallet. This authorizes the ShopOS Mezo contract to spend up to this amount for Fast Pay.`);
 
     try {
+      // Validate token contract before attempting approval
+      if (address) {
+        const validationResult = await validateTokenContract(
+          MUSD_ADDRESS,
+          chainId,
+          address
+        );
+
+        if (!validationResult.isValid) {
+          console.error('[Register] Token validation failed before allowance approval:', {
+            tokenAddress: MUSD_ADDRESS,
+            chainId,
+            connectedWallet: address,
+            errorMessage: validationResult.errorMessage,
+          });
+          throw new Error(`Invalid token contract configuration: ${validationResult.errorMessage}`);
+        }
+      }
+
       if (!isAddress(MUSD_ADDRESS)) {
         throw new Error('Invalid NEXT_PUBLIC_MUSD_ADDRESS configuration.');
       }

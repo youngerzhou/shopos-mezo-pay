@@ -8,6 +8,7 @@ import {
   useConnect,
   useSwitchChain
 } from 'wagmi';
+import { useModal } from 'connectkit';
 import { parseUnits } from 'viem';
 import { roundMoney2 } from '@/app/lib/money';
 import { formatMUSD } from '@/lib/money';
@@ -49,8 +50,9 @@ export function ContractInteraction({
 }: ContractInteractionProps) {
   const { toast } = useToast();
   const { address, isConnected } = useAccount();
-  const { connect, connectors } = useConnect();
+  const { isPending: isConnecting } = useConnect();
   const { switchChain } = useSwitchChain();
+  const { setOpen: setConnectModalOpen } = useModal();
 
   const {
     writeContract,
@@ -68,8 +70,7 @@ export function ContractInteraction({
 
   const handlePayment = async () => {
     if (!isConnected) {
-      const injected = connectors.find(c => c.id === 'injected');
-      if (injected) connect({ connector: injected });
+      setConnectModalOpen(true);
       return;
     }
 
@@ -115,13 +116,11 @@ export function ContractInteraction({
       {!isConnected ? (
         <Button
           className="w-full rounded-2xl h-14 font-black gap-2 bg-primary text-secondary shadow-lg hover:scale-[1.02] transition-transform"
-          onClick={() => {
-            const injected = connectors.find(c => c.id === 'injected');
-            if (injected) connect({ connector: injected });
-          }}
+          disabled={isConnecting}
+          onClick={() => setConnectModalOpen(true)}
         >
-          <Wallet className="w-5 h-5" />
-          Connect Mezo Wallet
+          {isConnecting ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Wallet className="w-5 h-5" />}
+          {isConnecting ? 'Connecting' : 'Connect Mezo Wallet'}
         </Button>
       ) : (
         <Button

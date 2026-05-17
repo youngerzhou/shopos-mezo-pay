@@ -5,6 +5,120 @@ import { mezoTestnet, MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app
 const MUSD_ADDRESS = MUSD_ADDRESSES.testnet;
 const DEFAULT_MUSD_DECIMALS = 18;
 
+// Token validation interface
+export interface TokenValidationResult {
+  isValid: boolean;
+  decimals: number;
+  symbol: string;
+  errorMessage?: string;
+}
+
+// Comprehensive token validation function
+export async function validateTokenContract(
+  tokenAddress: string,
+  chainId: number,
+  walletAddress?: string
+): Promise<TokenValidationResult> {
+  // Validate address format
+  if (!isAddress(tokenAddress)) {
+    console.error('[TokenValidation] Invalid token address format:', {
+      tokenAddress,
+      chainId,
+      walletAddress,
+    });
+    return {
+      isValid: false,
+      decimals: 0,
+      symbol: 'UNKNOWN',
+      errorMessage: 'Invalid token address format',
+    };
+  }
+
+  try {
+    const client = createPublicClient({
+      chain: mezoTestnet,
+      transport: http(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim()),
+    });
+
+    // Test decimals() function
+    const decimals = await client.readContract({
+      address: tokenAddress as `0x${string}`,
+      abi: [
+        {
+          name: 'decimals',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [],
+          outputs: [{ name: '', type: 'uint8' }],
+        },
+      ],
+      functionName: 'decimals',
+    });
+
+    // Test symbol() function
+    const symbol = await client.readContract({
+      address: tokenAddress as `0x${string}`,
+      abi: [
+        {
+          name: 'symbol',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [],
+          outputs: [{ name: '', type: 'string' }],
+        },
+      ],
+      functionName: 'symbol',
+    });
+
+    // If wallet address provided, test balanceOf()
+    if (walletAddress) {
+      await client.readContract({
+        address: tokenAddress as `0x${string}`,
+        abi: [
+          {
+            name: 'balanceOf',
+            type: 'function',
+            stateMutability: 'view',
+            inputs: [{ name: 'account', type: 'address' }],
+            outputs: [{ name: '', type: 'uint256' }],
+          },
+        ],
+        functionName: 'balanceOf',
+        args: [walletAddress as `0x${string}`],
+      });
+    }
+
+    console.log('[TokenValidation] Token contract validated successfully:', {
+      tokenAddress,
+      chainId,
+      decimals,
+      symbol,
+      walletAddress,
+    });
+
+    return {
+      isValid: true,
+      decimals: Number(decimals),
+      symbol: symbol as string,
+    };
+  } catch (error: any) {
+    console.error('[TokenValidation] Token contract validation failed:', {
+      tokenAddress,
+      chainId,
+      walletAddress,
+      errorMessage: error?.message || 'Unknown error',
+      errorDetails: error,
+    });
+
+    return {
+      isValid: false,
+      decimals: 0,
+      symbol: 'UNKNOWN',
+      errorMessage: error?.message || 'Invalid token contract configuration',
+    };
+  }
+}
+
 export const ALLOWANCE_TIERS = [
   { amount: 100, discount: 0.05, label: 'Silver' },
   { amount: 500, discount: 0.08, label: 'Gold' },
@@ -25,7 +139,7 @@ export function getTierForAllowance(allowanceInUnits: bigint) {
 
 export const publicClient = createPublicClient({
   chain: mezoTestnet,
-  transport: http()
+  transport: http(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim())
 });
 
 const erc20DebugAbi = [
@@ -91,7 +205,7 @@ function validateFastPayAddresses(customerAddress: string, recipientAddress?: st
 async function getMusdDecimals(): Promise<number> {
   try {
     return Number(await publicClient.readContract({
-      address: MUSD_ADDRESS,
+      address: MUSD_ADDRESS as `0x${string}`,
       abi: erc20DebugAbi,
       functionName: 'decimals'
     }));
@@ -114,33 +228,33 @@ async function logFastPayDebugSnapshot(params: {
     const decimals = await getMusdDecimals();
     const [allowance, customerBalance, merchantBalance, contractOwner, relayerIsOperator] = await Promise.all([
       publicClient.readContract({
-        address: MUSD_ADDRESS,
+        address: MUSD_ADDRESS as `0x${string}`,
         abi: erc20DebugAbi,
         functionName: 'allowance',
-        args: [customerAddress, SHOPOS_PULL_PAYMENT_CONTRACT]
+        args: [customerAddress, SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`]
       }) as Promise<bigint>,
       publicClient.readContract({
-        address: MUSD_ADDRESS,
+        address: MUSD_ADDRESS as `0x${string}`,
         abi: erc20DebugAbi,
         functionName: 'balanceOf',
         args: [customerAddress]
       }) as Promise<bigint>,
       recipientAddress
         ? publicClient.readContract({
-            address: MUSD_ADDRESS,
+            address: MUSD_ADDRESS as `0x${string}`,
             abi: erc20DebugAbi,
             functionName: 'balanceOf',
             args: [recipientAddress]
           }) as Promise<bigint>
         : Promise.resolve(null),
       publicClient.readContract({
-        address: SHOPOS_PULL_PAYMENT_CONTRACT,
+        address: SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`,
         abi: pullPaymentDebugAbi,
         functionName: 'owner'
       }) as Promise<`0x${string}`>,
       relayerAddress
         ? publicClient.readContract({
-            address: SHOPOS_PULL_PAYMENT_CONTRACT,
+            address: SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`,
             abi: pullPaymentDebugAbi,
             functionName: 'operators',
             args: [relayerAddress]
@@ -183,10 +297,10 @@ export async function getOnChainAllowance(customerAddress: string): Promise<bigi
 
   try {
     const allowance = await publicClient.readContract({
-      address: MUSD_ADDRESS,
+      address: MUSD_ADDRESS as `0x${string}`,
       abi: erc20DebugAbi,
       functionName: 'allowance',
-      args: [customerAddress, SHOPOS_PULL_PAYMENT_CONTRACT]
+      args: [customerAddress as `0x${string}`, SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`]
     }) as bigint;
     return allowance;
   } catch (err) {
@@ -225,8 +339,8 @@ export async function executePullPayment(customerAddress: string, recipientAddre
   }
 
   await logFastPayDebugSnapshot({
-    customerAddress,
-    recipientAddress,
+    customerAddress: customerAddress as `0x${string}`,
+    recipientAddress: recipientAddress as `0x${string}`,
     amountInUnits,
     relayerAddress,
     stage: 'before-pull-payment'
@@ -256,11 +370,11 @@ export async function executePullPayment(customerAddress: string, recipientAddre
   const walletClient = createWalletClient({
     account,
     chain: mezoTestnet,
-    transport: http()
+    transport: http(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim())
   });
 
   const hash = await walletClient.writeContract({
-    address: SHOPOS_PULL_PAYMENT_CONTRACT,
+    address: SHOPOS_PULL_PAYMENT_CONTRACT as `0x${string}`,
     abi: [
       {
         name: 'pullPayment',
@@ -276,8 +390,8 @@ export async function executePullPayment(customerAddress: string, recipientAddre
     ],
     functionName: 'pullPayment',
     args: [
-      customerAddress,
-      recipientAddress,
+      customerAddress as `0x${string}`,
+      recipientAddress as `0x${string}`,
       amountInUnits
     ]
   });
