@@ -5,12 +5,13 @@ import { AlertCircle, CheckCircle2, RefreshCw, Wallet } from 'lucide-react';
 import { parseUnits, formatUnits } from 'viem';
 import {
   useAccount,
+  useConnect,
   usePublicClient,
   useSwitchChain,
   useWaitForTransactionReceipt,
   useWriteContract
 } from 'wagmi';
-import { useModal } from 'connectkit';
+import { ConnectKitButton, useModal } from 'connectkit';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { mezoTestnet, MEZO_RPC_URL, MUSD_ADDRESSES } from '@/app/lib/mezo-config';
@@ -188,7 +189,8 @@ function metricValue(value: number | null, invalid: boolean) {
 function CustomerPayContent() {
   const params = useSearchParams();
   const publicClient = usePublicClient();
-  const { address, isConnected, chainId } = useAccount();
+  const { address, isConnected, chainId, connector } = useAccount();
+  const { connectors, error: connectError } = useConnect();
   const { switchChain } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
   const { setOpen: setConnectModalOpen } = useModal();
@@ -205,6 +207,11 @@ function CustomerPayContent() {
   const [loadingBalances, setLoadingBalances] = useState(false);
   const [needsApproval, setNeedsApproval] = useState(false);
   const [tokenDiagnostics, setTokenDiagnostics] = useState<TokenDiagnostics>(emptyDiagnostics);
+  const [walletDebug, setWalletDebug] = useState({
+    isMobile: 'unknown',
+    hasEthereum: 'unknown',
+    walletConnectProjectIdPresent: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() ? 'yes' : 'no'
+  });
 
   const paymentIntentId = params.get('paymentIntentId') || '';
   const orderId = params.get('orderId') || '';
@@ -226,6 +233,34 @@ function CustomerPayContent() {
   const paymentContract = process.env.NEXT_PUBLIC_SHOPOS_PAYMENT_CONTRACT || '';
   const merchantEnv = process.env.NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET || '';
   const rpcUrl = MEZO_RPC_URL;
+
+  const connectorSummary = useMemo(() => {
+    if (!connectors.length) return '-';
+    return connectors.map((item) => `${item.name} (${item.id})`).join(', ');
+  }, [connectors]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const userAgent = window.navigator.userAgent || '';
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent);
+    const hasEthereum = Boolean((window as any).ethereum);
+    const nextDebug = {
+      isMobile: isMobile ? 'yes' : 'no',
+      hasEthereum: hasEthereum ? 'yes' : 'no',
+      walletConnectProjectIdPresent: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() ? 'yes' : 'no'
+    };
+    setWalletDebug(nextDebug);
+    console.log('[WalletConnectDebug] customer-pay wallet environment', {
+      ...nextDebug,
+      availableConnectors: connectors.map((item) => ({
+        id: item.id,
+        name: item.name,
+        type: item.type
+      })),
+      selectedConnector: connector ? `${connector.name} (${connector.id})` : '-',
+      connectionErrorMessage: connectError?.message || '-'
+    });
+  }, [connectError?.message, connector, connectors]);
 
   const amountInUnits = useMemo(() => {
     try {
@@ -553,8 +588,27 @@ function CustomerPayContent() {
     }
   }, [hasEnoughAllowance, step]);
 
-  const connectWallet = () => {
+  const connectWallet = (show?: () => void) => {
     // Use ConnectKit modal to show wallet selector (same as register page)
+    setError('');
+    console.log('[WalletConnectDebug] connect wallet clicked', {
+      isMobile: walletDebug.isMobile,
+      hasEthereum: walletDebug.hasEthereum,
+      walletConnectProjectIdPresent: walletDebug.walletConnectProjectIdPresent,
+      availableConnectors: connectors.map((item) => ({
+        id: item.id,
+        name: item.name,
+        type: item.type
+      })),
+      selectedConnector: connector ? `${connector.name} (${connector.id})` : '-',
+      connectionErrorMessage: connectError?.message || '-'
+    });
+
+    if (typeof show === 'function') {
+      show();
+      return;
+    }
+
     setConnectModalOpen(true);
   };
 
@@ -748,18 +802,33 @@ function CustomerPayContent() {
                 </div>
               )}
 
-              <Button
-                className="mt-4 h-12 w-full rounded-xl bg-orange-600 text-base font-black text-white hover:bg-red-950"
-                disabled={disablePrimary}
-                onClick={primaryAction}
-              >
-                {loadingBalances || step === 'approving' || step === 'paying' || isPaymentConfirming ? (
-                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Wallet className="mr-2 h-4 w-4" />
-                )}
-                {primaryLabel}
-              </Button>
+              {!isConnected ? (
+                <ConnectKitButton.Custom>
+                  {({ show }) => (
+                    <Button
+                      className="mt-4 h-12 w-full rounded-xl bg-orange-600 text-base font-black text-white hover:bg-red-950"
+                      disabled={disablePrimary}
+                      onClick={() => connectWallet(show)}
+                    >
+                      <Wallet className="mr-2 h-4 w-4" />
+                      {primaryLabel}
+                    </Button>
+                  )}
+                </ConnectKitButton.Custom>
+              ) : (
+                <Button
+                  className="mt-4 h-12 w-full rounded-xl bg-orange-600 text-base font-black text-white hover:bg-red-950"
+                  disabled={disablePrimary}
+                  onClick={primaryAction}
+                >
+                  {loadingBalances || step === 'approving' || step === 'paying' || isPaymentConfirming ? (
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Wallet className="mr-2 h-4 w-4" />
+                  )}
+                  {primaryLabel}
+                </Button>
+              )}
               <Button
                 className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white text-sm font-black text-slate-800 hover:bg-slate-50"
                 disabled={loadingBalances}
@@ -832,6 +901,12 @@ function CustomerPayContent() {
             <DebugRow label="merchant wallet" value={tokenDiagnostics.merchantWallet || merchant || '-'} />
             <DebugRow label="connected wallet" value={tokenDiagnostics.connectedWallet || address || '-'} />
             <DebugRow label="current chainId" value={tokenDiagnostics.currentChainId || chainId?.toString() || '-'} />
+            <DebugRow label="wallet debug isMobile" value={walletDebug.isMobile} />
+            <DebugRow label="wallet debug window.ethereum" value={walletDebug.hasEthereum} />
+            <DebugRow label="WalletConnect projectId present" value={walletDebug.walletConnectProjectIdPresent} />
+            <DebugRow label="available wallet connectors" value={connectorSummary} />
+            <DebugRow label="selected wallet connector" value={connector ? `${connector.name} (${connector.id})` : '-'} />
+            <DebugRow label="wallet connection error" value={connectError?.message || '-'} />
             <DebugRow label="RPC chainId" value={tokenDiagnostics.rpcChainId || '-'} />
             <DebugRow label="expected chainId" value={tokenDiagnostics.expectedChainId || String(mezoTestnet.id)} />
             <DebugRow label="RPC URL" value={tokenDiagnostics.rpcUrl || rpcUrl || '-'} />

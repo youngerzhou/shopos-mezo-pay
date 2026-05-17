@@ -11,9 +11,10 @@ export { mezoTestnet };
 // Note: This function must only be called client-side to avoid SSR issues
 function initializeWagmiConfig() {
   const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim();
+  const hasWalletConnectProjectId = Boolean(walletConnectProjectId);
 
-  if (!walletConnectProjectId) {
-    throw new Error('Missing NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID for WalletConnect mobile deep-linking.');
+  if (!hasWalletConnectProjectId) {
+    console.error('[WalletConnectDebug] Missing NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID. Mobile browser wallet connection will not include WalletConnect.');
   }
 
   if (!MEZO_RPC_URL) {
@@ -60,15 +61,33 @@ function initializeWagmiConfig() {
 
   const config = createConfig(
     getDefaultConfig({
-      walletConnectProjectId,
+      walletConnectProjectId: walletConnectProjectId || '',
       appName: 'ShopOS Mezo',
+      appDescription: 'ShopOS Mezo QR payments',
+      appUrl: typeof window !== 'undefined' ? window.location.origin : 'https://shopos-mezo-pay.vercel.app',
       chains: [mezoTestnet],
       transports: {
         [mezoTestnet.id]: http(MEZO_RPC_URL),
       },
       storage,
+      coinbaseWalletPreference: 'all',
     })
   );
+
+  console.log('[WalletConnectDebug] wagmi connectors configured', {
+    walletConnectProjectIdPresent: hasWalletConnectProjectId ? 'yes' : 'no',
+    mobileConnectorSupport: {
+      metaMask: 'yes',
+      walletConnect: hasWalletConnectProjectId ? 'yes' : 'no',
+      coinbaseWallet: 'yes',
+      injected: 'yes'
+    },
+    connectors: config.connectors.map((connector) => ({
+      id: connector.id,
+      name: connector.name,
+      type: connector.type
+    }))
+  });
 
   return config;
 }
