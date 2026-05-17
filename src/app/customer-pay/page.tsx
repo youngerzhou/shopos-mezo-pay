@@ -13,7 +13,7 @@ import {
 import { useModal } from 'connectkit';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { mezoTestnet, MUSD_ADDRESSES } from '@/app/lib/mezo-config';
+import { mezoTestnet, MEZO_RPC_URL, MUSD_ADDRESSES } from '@/app/lib/mezo-config';
 import { formatMUSD, formatMoney } from '@/lib/money';
 
 const erc20Abi = [
@@ -81,6 +81,8 @@ type TokenDiagnostics = {
   envMusdTokenAddress: string;
   envShoposMusdToken: string;
   envMusdAddress: string;
+  envMezoRpcUrl: string;
+  envLegacySepoliaRpcUrl: string;
   musdAddress: string;
   paymentContract: string;
   merchantWallet: string;
@@ -108,6 +110,8 @@ const emptyDiagnostics: TokenDiagnostics = {
   envMusdTokenAddress: '',
   envShoposMusdToken: '',
   envMusdAddress: '',
+  envMezoRpcUrl: '',
+  envLegacySepoliaRpcUrl: '',
   musdAddress: '',
   paymentContract: '',
   merchantWallet: '',
@@ -145,6 +149,14 @@ function isEvmAddress(value?: string) {
 
 function getErrorMessage(err: any) {
   return err?.shortMessage || err?.message || 'Unknown error';
+}
+
+function chainName(chainId?: number | string) {
+  const id = Number(chainId);
+  if (id === 31611) return 'Mezo Testnet';
+  if (id === 11155111) return 'Ethereum Sepolia';
+  if (!Number.isFinite(id)) return 'Unknown chain';
+  return `Unknown chain ${id}`;
 }
 
 function serializeError(err: any) {
@@ -207,10 +219,12 @@ function CustomerPayContent() {
   const envMusdTokenAddress = process.env.NEXT_PUBLIC_MUSD_TOKEN_ADDRESS || '';
   const envShoposMusdToken = process.env.NEXT_PUBLIC_SHOPOS_MUSD_TOKEN || '';
   const envMusdAddress = process.env.NEXT_PUBLIC_MUSD_ADDRESS || '';
+  const envMezoRpcUrl = process.env.NEXT_PUBLIC_MEZO_RPC_URL || '';
+  const envLegacySepoliaRpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL || '';
   const musdAddress = MUSD_ADDRESSES.testnet;
   const paymentContract = process.env.NEXT_PUBLIC_SHOPOS_PAYMENT_CONTRACT || '';
   const merchantEnv = process.env.NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET || '';
-  const rpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL || '';
+  const rpcUrl = MEZO_RPC_URL;
 
   const amountInUnits = useMemo(() => {
     try {
@@ -228,7 +242,7 @@ function CustomerPayContent() {
     !musdAddress ? 'MUSD token address (configure NEXT_PUBLIC_MUSD_TOKEN_ADDRESS)' : '',
     !paymentContract ? 'NEXT_PUBLIC_SHOPOS_PAYMENT_CONTRACT' : '',
     !merchantEnv ? 'NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET' : '',
-    !rpcUrl ? 'NEXT_PUBLIC_SEPOLIA_RPC_URL' : ''
+    !rpcUrl ? 'NEXT_PUBLIC_MEZO_RPC_URL' : ''
   ].filter(Boolean);
 
   const legacyMUSDSetupWarning = !envMusdTokenAddress && musdAddress
@@ -256,6 +270,8 @@ function CustomerPayContent() {
       envMusdTokenAddress,
       envShoposMusdToken,
       envMusdAddress,
+      envMezoRpcUrl,
+      envLegacySepoliaRpcUrl,
       musdAddress: musdAddress || '',
       paymentContract,
       merchantWallet: merchant || merchantEnv || '',
@@ -351,7 +367,7 @@ function CustomerPayContent() {
         const rpcChainId = await publicClient.getChainId();
         setPartialDiagnostics({ rpcChainId: rpcChainId.toString() });
         if (rpcChainId !== mezoTestnet.id) {
-          const message = `RPC chainId mismatch. RPC returned ${rpcChainId}, expected ${mezoTestnet.id}.`;
+          const message = `RPC chainId mismatch. Configured RPC is ${chainName(rpcChainId)} (${rpcChainId}), but payments require ${chainName(mezoTestnet.id)} (${mezoTestnet.id}). Set NEXT_PUBLIC_MEZO_RPC_URL=https://rpc.test.mezo.org in the deployed environment.`;
           failStep('checkRpcChainId', message, { ...nextDiagnostics, rpcChainId: rpcChainId.toString() });
           logDebugFailure('checkRpcChainId', { rpcUrl, chainId, expectedChainId: mezoTestnet.id, functionName: 'eth_chainId', args: [] }, new Error(message));
           return;
@@ -504,7 +520,7 @@ function CustomerPayContent() {
     } finally {
       setLoadingBalances(false);
     }
-  }, [address, addressCollisionCheck, amount, amountInUnits, envMusdAddress, envMusdTokenAddress, envShoposMusdToken, musdAddress, paymentContract, publicClient, chainId, tokenAddressConfigError, merchant, merchantEnv, rpcUrl]);
+  }, [address, addressCollisionCheck, amount, amountInUnits, envLegacySepoliaRpcUrl, envMezoRpcUrl, envMusdAddress, envMusdTokenAddress, envShoposMusdToken, musdAddress, paymentContract, publicClient, chainId, tokenAddressConfigError, merchant, merchantEnv, rpcUrl]);
 
   useEffect(() => {
     if (isConnected && !isWrongNetwork) {
@@ -769,6 +785,8 @@ function CustomerPayContent() {
             <DebugRow label="NEXT_PUBLIC_MUSD_TOKEN_ADDRESS" value={tokenDiagnostics.envMusdTokenAddress || envMusdTokenAddress || '-'} />
             <DebugRow label="NEXT_PUBLIC_SHOPOS_MUSD_TOKEN" value={tokenDiagnostics.envShoposMusdToken || envShoposMusdToken || '-'} />
             <DebugRow label="NEXT_PUBLIC_MUSD_ADDRESS" value={tokenDiagnostics.envMusdAddress || envMusdAddress || '-'} />
+            <DebugRow label="NEXT_PUBLIC_MEZO_RPC_URL" value={tokenDiagnostics.envMezoRpcUrl || envMezoRpcUrl || '-'} />
+            <DebugRow label="NEXT_PUBLIC_SEPOLIA_RPC_URL legacy" value={tokenDiagnostics.envLegacySepoliaRpcUrl || envLegacySepoliaRpcUrl || '-'} />
             <DebugRow label="resolved MUSD token address" value={tokenDiagnostics.musdAddress || musdAddress || '-'} />
             <DebugRow label="ShopOSPayment contract address" value={tokenDiagnostics.paymentContract || paymentContract || '-'} />
             <DebugRow label="merchant wallet" value={tokenDiagnostics.merchantWallet || merchant || '-'} />

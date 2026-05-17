@@ -4,21 +4,20 @@ import { useMemo } from 'react';
 import { WagmiProvider, createConfig, createStorage, http } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ConnectKitProvider, getDefaultConfig } from 'connectkit';
-import { mezoTestnet } from '@/app/lib/mezo-config';
+import { mezoTestnet, MEZO_RPC_URL } from '@/app/lib/mezo-config';
 
 export { mezoTestnet };
 
 // Note: This function must only be called client-side to avoid SSR issues
 function initializeWagmiConfig() {
   const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim();
-  const sepoliaRpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim();
 
   if (!walletConnectProjectId) {
     throw new Error('Missing NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID for WalletConnect mobile deep-linking.');
   }
 
-  if (!sepoliaRpcUrl) {
-    throw new Error('Missing NEXT_PUBLIC_SEPOLIA_RPC_URL for Sepolia / Mezo RPC transport.');
+  if (!MEZO_RPC_URL) {
+    throw new Error('Missing NEXT_PUBLIC_MEZO_RPC_URL for Mezo RPC transport.');
   }
 
   const baseStorage = {
@@ -65,7 +64,7 @@ function initializeWagmiConfig() {
       appName: 'ShopOS Mezo',
       chains: [mezoTestnet],
       transports: {
-        [mezoTestnet.id]: http(sepoliaRpcUrl),
+        [mezoTestnet.id]: http(MEZO_RPC_URL),
       },
       storage,
     })

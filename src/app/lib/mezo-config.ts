@@ -1,6 +1,12 @@
 import { defineChain, createPublicClient, http } from 'viem';
 
-const defaultSepoliaRpc = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim() || 'https://rpc.test.mezo.org/';
+const DEFAULT_MEZO_TESTNET_RPC_URL = 'https://rpc.test.mezo.org/';
+
+export const MEZO_RPC_URL =
+  process.env.NEXT_PUBLIC_MEZO_RPC_URL?.trim() ||
+  process.env.NEXT_PUBLIC_MEZO_TESTNET_RPC_URL?.trim() ||
+  process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim() ||
+  DEFAULT_MEZO_TESTNET_RPC_URL;
 
 /**
  * Get the first configured address from environment variables.
@@ -26,10 +32,10 @@ export const mezoTestnet = defineChain({
   },
   rpcUrls: {
     default: {
-      http: [defaultSepoliaRpc],
+      http: [MEZO_RPC_URL],
     },
     public: {
-      http: [defaultSepoliaRpc],
+      http: [MEZO_RPC_URL],
     },
   },
   blockExplorers: {
@@ -43,7 +49,7 @@ export const mezoTestnet = defineChain({
 
 export const publicClient = createPublicClient({
   chain: mezoTestnet,
-  transport: http(defaultSepoliaRpc),
+  transport: http(MEZO_RPC_URL),
 });
 
 /**

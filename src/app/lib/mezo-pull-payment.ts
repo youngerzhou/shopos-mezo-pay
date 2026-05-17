@@ -1,6 +1,6 @@
 import { createPublicClient, createWalletClient, formatUnits, Hex, http, isAddress, parseUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { mezoTestnet, MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app/lib/mezo-config';
+import { mezoTestnet, MEZO_RPC_URL, MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app/lib/mezo-config';
 
 const MUSD_ADDRESS = MUSD_ADDRESSES.testnet;
 const DEFAULT_MUSD_DECIMALS = 18;
@@ -37,7 +37,7 @@ export async function validateTokenContract(
   try {
     const client = createPublicClient({
       chain: mezoTestnet,
-      transport: http(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim()),
+      transport: http(MEZO_RPC_URL),
     });
 
     // Test decimals() function
@@ -139,7 +139,7 @@ export function getTierForAllowance(allowanceInUnits: bigint) {
 
 export const publicClient = createPublicClient({
   chain: mezoTestnet,
-  transport: http(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim())
+  transport: http(MEZO_RPC_URL)
 });
 
 const erc20DebugAbi = [
@@ -370,7 +370,7 @@ export async function executePullPayment(customerAddress: string, recipientAddre
   const walletClient = createWalletClient({
     account,
     chain: mezoTestnet,
-    transport: http(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim())
+    transport: http(MEZO_RPC_URL)
   });
 
   const hash = await walletClient.writeContract({
