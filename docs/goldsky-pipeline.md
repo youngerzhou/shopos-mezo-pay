@@ -40,37 +40,105 @@ https://shopos-mezo-pay.vercel.app/api/webhook
 
 ## Example Pipeline YAML
 
-Replace `${SHOPOS_PAYMENT_CONTRACT_ADDRESS}` with the deployed `ShopOSPayment` address.
+Use a block near the first known `OrderPaid` payment instead of `earliest`.
+
+Known QR payment transaction:
+
+```text
+0x0565a28dc573e20194bbcedfa46cefad363869b601babf6ef0beedeec1038531
+```
+
+Receipt block:
+
+```text
+13,107,020
+```
+
+Recommended `start_at`:
+
+```text
+13,107,000
+```
+
+### Temporary Pipeline: Address Only
+
+Use this first to confirm Goldsky can pick up any logs emitted by `ShopOSPayment`.
 
 ```yaml
-name: shopos-payment-order-paid
+name: mezo-testnet-erc-20
 resource_size: s
 apiVersion: 3
 sources:
-  shopos_order_paid:
+  shopos_payment_logs:
     type: dataset
     dataset_name: mezo-testnet.raw_logs
     version: 1.0.0
-    start_at: latest
+    start_at: 13107000
     filter: |
-      address = lower('${SHOPOS_PAYMENT_CONTRACT_ADDRESS}')
-      and topic0 = lower('0x09e99da262bb12c46eaeae571a859520dbb1218e8f6e186e4c0392269e98ed36')
+      address = lower('0xcf0e257daacba51cbfec1580f3593b3dfdc2802b')
 transforms:
-  decode_order_paid:
+  logs:
+    type: sql
+    primary_key: id
     sql: |
       select
+        id,
         transaction_hash,
         block_number,
         block_timestamp,
         address as contract_address,
         topics,
-        data
-      from shopos_order_paid
+        data,
+        log_index,
+        _gs_op
+      from shopos_payment_logs
 sinks:
   shopos_webhook:
     type: webhook
     url: https://shopos-mezo-pay.vercel.app/api/webhook
-    from: decode_order_paid
+    from: logs
+    one_row_per_request: true
+```
+
+### Final Pipeline: Address + OrderPaid Topic
+
+Goldsky raw log examples treat `topics` as a comma-separated string in SQL transforms. Use `SPLIT_INDEX(topics, ',', 0)` for topic0 filtering instead of `topics LIKE '0x09e99...%'`.
+
+```yaml
+name: mezo-testnet-erc-20
+resource_size: s
+apiVersion: 3
+sources:
+  shopos_payment_logs:
+    type: dataset
+    dataset_name: mezo-testnet.raw_logs
+    version: 1.0.0
+    start_at: 13107000
+    filter: |
+      address = lower('0xcf0e257daacba51cbfec1580f3593b3dfdc2802b')
+transforms:
+  order_paid_logs:
+    type: sql
+    primary_key: id
+    sql: |
+      select
+        id,
+        transaction_hash,
+        block_number,
+        block_timestamp,
+        address as contract_address,
+        topics,
+        data,
+        log_index,
+        _gs_op
+      from shopos_payment_logs
+      where split_index(topics, ',', 0) = lower('0x09e99da262bb12c46eaeae571a859520dbb1218e8f6e186e4c0392269e98ed36')
+sinks:
+  shopos_webhook:
+    type: webhook
+    url: https://shopos-mezo-pay.vercel.app/api/webhook
+    from: order_paid_logs
+    one_row_per_request: true
 ```
 
 ## Filtering Contract Address
@@ -97,4 +165,3 @@ The indexed `paymentIntentId` and `orderId` are bytes32 values. ShopOS stores st
 ## Why Not Listen Only to ERC20 Transfer
 
 Do not rely only on the MUSD `Transfer` event. A token transfer only proves value moved; it does not carry the ShopOS `paymentIntentId` or `orderId`. `OrderPaid` binds the transfer to the checkout intent, merchant, payer, token, and amount in one event, which makes webhook confirmation deterministic.
-

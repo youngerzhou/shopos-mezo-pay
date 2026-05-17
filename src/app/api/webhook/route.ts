@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { updateTransactionByRecipient, logWebhook } from '@/app/lib/db';
 import { roundMoney2 } from '@/app/lib/money';
-import { processMusdOrderPaidWebhook } from '@/app/lib/musd-payment-webhook';
+import { normalizeGoldskyOrderPaidEvent, processMusdOrderPaidWebhook } from '@/app/lib/musd-payment-webhook';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -32,14 +32,40 @@ export async function GET() {
   });
 }
 
+function redactHeaders(headers: Headers) {
+  return Object.fromEntries(
+    Array.from(headers.entries()).map(([key, value]) => [
+      key,
+      ['authorization', 'cookie', 'x-goldsky-secret', 'x-webhook-secret'].includes(key.toLowerCase()) ? '[redacted]' : value
+    ])
+  );
+}
+
+function extractLogPreview(payload: any) {
+  const rows = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [payload?.data || payload];
+  return rows.map((row: any) => ({
+    txHash: row?.transaction_hash || row?.transactionHash || row?.txHash || row?.hash,
+    topics: row?.topics || row?.log?.topics,
+    decodedEvent: normalizeGoldskyOrderPaidEvent(row)
+  }));
+}
+
 /**
  * Handle Webhooks from Goldsky Indexer
  */
 export async function POST(req: NextRequest) {
+  let rawBody = '';
   try {
-    const payload = await req.json();
-    console.log('--- [GOLD SKY] WEBHOOK RECEIVED ---');
-    console.log('FULL PAYLOAD:', JSON.stringify(payload, null, 2));
+    rawBody = await req.text();
+    const payload = rawBody ? JSON.parse(rawBody) : {};
+    console.log('[GoldskyWebhook] request received', {
+      route: '/api/webhook',
+      method: req.method,
+      url: req.url,
+      headers: redactHeaders(req.headers),
+      rawBody,
+      logs: extractLogPreview(payload)
+    });
     
     // Save raw payload (essential for debug)
     await logWebhook(payload);
@@ -47,23 +73,28 @@ export async function POST(req: NextRequest) {
     const musdResult = await processMusdOrderPaidWebhook(payload);
     if (musdResult.handled) {
       if (musdResult.errors.length > 0 && musdResult.confirmed.length === 0) {
-        console.error('[OrderPaid webhook] Unable to confirm payment intent:', musdResult.errors.join('; '));
-        return NextResponse.json({
+        console.warn('[OrderPaid webhook] Unable to confirm payment intent:', musdResult.errors.join('; '));
+        const responseBody = {
           success: false,
           processed: 0,
-          errors: musdResult.errors
-        }, {
-          status: 400,
+          errors: musdResult.errors,
+          acknowledged: true
+        };
+        console.log('[GoldskyWebhook] response', { route: '/api/webhook', status: 200, body: responseBody });
+        return NextResponse.json(responseBody, {
+          status: 200,
           headers: { 'Access-Control-Allow-Origin': '*' }
         });
       }
 
-      return NextResponse.json({
+      const responseBody = {
         success: musdResult.errors.length === 0,
         processed: musdResult.confirmed.length,
         confirmed: musdResult.confirmed.map((intent) => intent.id),
         errors: musdResult.errors
-      }, {
+      };
+      console.log('[GoldskyWebhook] response', { route: '/api/webhook', status: 200, body: responseBody });
+      return NextResponse.json(responseBody, {
         status: 200,
         headers: { 'Access-Control-Allow-Origin': '*' }
       });
@@ -122,17 +153,26 @@ export async function POST(req: NextRequest) {
     const duration = Date.now() - startTime;
     console.log(`Webhook processed ${results.length} results in ${duration}ms`);
 
-    return NextResponse.json({ 
+    const responseBody = { 
       success: true, 
       processed: results.length 
-    }, {
+    };
+    console.log('[GoldskyWebhook] response', { route: '/api/webhook', status: 200, body: responseBody });
+    return NextResponse.json(responseBody, {
       status: 200,
       headers: { 'Access-Control-Allow-Origin': '*' }
     });
 
   } catch (error: any) {
-    console.error('Webhook processing failed:', error.message);
-    return NextResponse.json({ error: 'Server error' }, { 
+    console.error('[GoldskyWebhook] processing failed:', {
+      route: '/api/webhook',
+      message: error.message,
+      rawBody,
+      error
+    });
+    const responseBody = { error: 'Server error' };
+    console.log('[GoldskyWebhook] response', { route: '/api/webhook', status: 500, body: responseBody });
+    return NextResponse.json(responseBody, { 
       status: 500, 
       headers: { 'Access-Control-Allow-Origin': '*' } 
     });

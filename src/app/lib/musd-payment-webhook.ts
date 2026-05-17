@@ -1,4 +1,4 @@
-import { decodeEventLog, formatUnits, getAddress, parseAbiItem } from 'viem';
+import { decodeAbiParameters, decodeEventLog, formatUnits, getAddress, parseAbiItem } from 'viem';
 import { MUSD_ADDRESSES } from '@/app/lib/mezo-config';
 import {
   findPaymentIntentByOrderId,
@@ -12,6 +12,7 @@ import { roundMoney2 } from '@/app/lib/money';
 const ORDER_PAID_EVENT = parseAbiItem(
   'event OrderPaid(bytes32 indexed paymentIntentId, bytes32 indexed orderId, address indexed merchant, address payer, address token, uint256 amount)'
 );
+const ORDER_PAID_TOPIC0 = '0x09e99da262bb12c46eaeae571a859520dbb1218e8f6e186e4c0392269e98ed36';
 
 export type NormalizedGoldskyOrderPaidEvent = {
   paymentIntentId?: string;
@@ -24,6 +25,77 @@ export type NormalizedGoldskyOrderPaidEvent = {
   blockNumber?: number;
   rawEvent: unknown;
 };
+
+function normalizeTopics(value: any) {
+  if (Array.isArray(value)) return value.map((topic) => String(topic).trim()).filter(Boolean);
+  if (typeof value !== 'string') return undefined;
+
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? parsed.map((topic) => String(topic).trim()).filter(Boolean) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  return trimmed.replace(/^\{|\}$/g, '').split(',').map((topic) => topic.trim().replace(/^"|"$/g, '')).filter(Boolean);
+}
+
+function getTopicsFromRawLog(event: any) {
+  const topics = normalizeTopics(event?.topics || event?.log?.topics);
+  if (topics?.length) return topics;
+
+  const positionalTopics = [
+    pick(event, ['topic0', 'topic_0', 'topicZero']),
+    pick(event, ['topic1', 'topic_1']),
+    pick(event, ['topic2', 'topic_2']),
+    pick(event, ['topic3', 'topic_3'])
+  ].filter(Boolean);
+
+  return positionalTopics.length ? positionalTopics.map(String) : undefined;
+}
+
+function getLogData(event: any) {
+  return pick(event, ['data', 'logData', 'log_data']) || pick(event?.log, ['data', 'logData', 'log_data']);
+}
+
+function getTxHash(event: any) {
+  return String(pick(event, ['transaction_hash', 'transactionHash', 'tx_hash', 'txHash', 'hash']) || '');
+}
+
+function getBlockNumber(event: any) {
+  return Number(pick(event, ['block_number', 'blockNumber']) || 0) || undefined;
+}
+
+function getLogAddress(event: any) {
+  return String(pick(event, ['address', 'contract_address', 'contractAddress']) || pick(event?.log, ['address']) || '');
+}
+
+function topicToAddress(topic?: string) {
+  if (!topic || !/^0x[a-fA-F0-9]{64}$/.test(topic)) return '';
+  return getAddress(`0x${topic.slice(-40)}`);
+}
+
+function logRawLogDecodeSnapshot(event: any, decoded?: NormalizedGoldskyOrderPaidEvent, error?: unknown) {
+  const topics = getTopicsFromRawLog(event) || [];
+  console.log('[GoldskyWebhook] raw log decode snapshot', {
+    txHash: getTxHash(event),
+    logAddress: getLogAddress(event),
+    topicsCount: topics.length,
+    topic0: topics[0],
+    decodedPaymentIntentId: decoded?.paymentIntentId || '',
+    decodedOrderId: decoded?.orderId || '',
+    decodedMerchant: decoded?.merchant || '',
+    decodedPayer: decoded?.payerWallet || '',
+    decodedToken: decoded?.token || '',
+    decodedAmount: decoded?.amountMUSD,
+    decodeError: error instanceof Error ? error.message : error
+  });
+}
 
 function pick(obj: any, keys: string[]) {
   for (const key of keys) {
@@ -65,9 +137,17 @@ function normalizeDecodedArgs(args: any, rawEvent: unknown): NormalizedGoldskyOr
 }
 
 function tryDecodeLog(event: any): NormalizedGoldskyOrderPaidEvent | null {
-  const topics = event?.topics || event?.log?.topics;
-  const data = event?.data || event?.log?.data;
-  if (!Array.isArray(topics) || !data) return null;
+  const topics = getTopicsFromRawLog(event);
+  const data = getLogData(event);
+  if (!Array.isArray(topics) || topics.length === 0 || !data) {
+    logRawLogDecodeSnapshot(event, undefined, 'Missing topics or data');
+    return null;
+  }
+
+  if (topics[0]?.toLowerCase() !== ORDER_PAID_TOPIC0) {
+    logRawLogDecodeSnapshot(event, undefined, 'Non-OrderPaid topic0');
+    return null;
+  }
 
   try {
     const decoded = decodeEventLog({
@@ -76,9 +156,34 @@ function tryDecodeLog(event: any): NormalizedGoldskyOrderPaidEvent | null {
       topics
     });
     if (decoded.eventName !== 'OrderPaid') return null;
-    return normalizeDecodedArgs(decoded.args, event);
-  } catch {
-    return null;
+    const normalized = normalizeDecodedArgs(decoded.args, event);
+    logRawLogDecodeSnapshot(event, normalized);
+    return normalized;
+  } catch (err) {
+    try {
+      const [payer, token, amount] = decodeAbiParameters(
+        [
+          { name: 'payer', type: 'address' },
+          { name: 'token', type: 'address' },
+          { name: 'amount', type: 'uint256' }
+        ],
+        data
+      );
+      const normalized = {
+        paymentIntentId: topics[1] || '',
+        orderId: topics[2] || '',
+        merchant: topicToAddress(topics[3]),
+        payerWallet: payer,
+        token,
+        amountMUSD: toNumberAmount(amount),
+        rawEvent: event
+      };
+      logRawLogDecodeSnapshot(event, normalized);
+      return normalized;
+    } catch (fallbackErr) {
+      logRawLogDecodeSnapshot(event, undefined, fallbackErr);
+      return null;
+    }
   }
 }
 
@@ -92,29 +197,30 @@ function unwrapGoldskyPayload(payload: any) {
 export function normalizeGoldskyOrderPaidEvent(payload: unknown): NormalizedGoldskyOrderPaidEvent[] {
   const events = unwrapGoldskyPayload(payload);
 
-  return events.map((event: any) => {
+  return events.flatMap((event: any) => {
     const decoded = tryDecodeLog(event);
     if (decoded) {
-      return {
+      return [{
         ...decoded,
-        txHash: String(pick(event, ['transaction_hash', 'transactionHash', 'txHash', 'hash']) || ''),
-        blockNumber: Number(pick(event, ['block_number', 'blockNumber']) || 0) || undefined
-      };
+        txHash: getTxHash(event),
+        blockNumber: getBlockNumber(event)
+      }];
     }
 
     const args = event?.args || event?.decoded || event?.event || event;
-    return {
+    const normalized = {
       paymentIntentId: String(pick(args, ['paymentIntentId', 'payment_intent_id', 'paymentIntentIdBytes32']) || ''),
       orderId: String(pick(args, ['orderId', 'order_id', 'orderIdBytes32']) || ''),
       merchant: String(pick(args, ['merchant']) || ''),
       payerWallet: String(pick(args, ['payer', 'payerWallet', 'payer_wallet']) || ''),
       token: String(pick(args, ['token']) || ''),
       amountMUSD: toNumberAmount(pick(args, ['amountMUSD', 'amount_musd', 'amount', 'value'])),
-      txHash: String(pick(event, ['transaction_hash', 'transactionHash', 'txHash', 'hash']) || pick(args, ['transaction_hash', 'transactionHash', 'txHash', 'hash']) || ''),
-      blockNumber: Number(pick(event, ['block_number', 'blockNumber']) || pick(args, ['block_number', 'blockNumber']) || 0) || undefined,
+      txHash: getTxHash(event) || String(pick(args, ['transaction_hash', 'transactionHash', 'tx_hash', 'txHash', 'hash']) || ''),
+      blockNumber: getBlockNumber(event) || Number(pick(args, ['block_number', 'blockNumber']) || 0) || undefined,
       rawEvent: event
     };
-  }).filter((event) => event.paymentIntentId || event.orderId || event.txHash || event.amountMUSD !== undefined);
+    return normalized.paymentIntentId || normalized.orderId ? [normalized] : [];
+  });
 }
 
 function getExpectedMerchant() {
@@ -132,6 +238,8 @@ export async function processMusdOrderPaidWebhook(payload: unknown) {
   const normalizedEvents = normalizeGoldskyOrderPaidEvent(payload);
   const confirmed: any[] = [];
   const errors: string[] = [];
+
+  console.log('[GoldskyWebhook] decoded OrderPaid events', JSON.stringify(normalizedEvents, null, 2));
 
   for (const event of normalizedEvents) {
     const intent = event.paymentIntentId
