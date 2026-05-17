@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Check, Copy, RefreshCw } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '@/components/ui/button';
 import { formatMUSD } from '@/lib/money';
 import { BottomSheetFrame } from './BottomSheetFrame';
@@ -58,10 +59,12 @@ export function MusdQrPaymentSheet({
   const [status, setStatus] = useState<IntentStatus>('pending');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [copied, setCopied] = useState(false);
   const [hasSubmittedConfirmation, setHasSubmittedConfirmation] = useState(false);
 
   const qrPayload = intent?.qrPayload || '';
   const statusLabel = STATUS_LABELS[status] || 'Waiting for payment...';
+  const shortenedPaymentLink = qrPayload ? qrPayload.replace('https://shopos-mezo-pay.vercel.app', 'shopos-mezo-pay.vercel.app') : '';
 
   const createPaymentIntent = useCallback(async () => {
     setLoading(true);
@@ -163,7 +166,16 @@ export function MusdQrPaymentSheet({
     }
   };
 
-  const qrBlocks = useMemo(() => Array.from({ length: 25 }), []);
+  const copyPaymentLink = async () => {
+    if (!qrPayload) return;
+    try {
+      await navigator.clipboard.writeText(qrPayload);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setError('Unable to copy payment link.');
+    }
+  };
 
   return (
     <BottomSheetFrame open={open} title="MUSD Scan to Pay" onOpenChange={onOpenChange}>
@@ -179,19 +191,26 @@ export function MusdQrPaymentSheet({
         </div>
 
         <div className="mx-auto mt-5 flex h-56 w-56 items-center justify-center rounded-3xl border-8 border-white bg-white shadow-sm">
-          <div className="grid h-44 w-44 grid-cols-5 grid-rows-5 gap-1 rounded-xl bg-slate-100 p-3">
-            {qrBlocks.map((_, index) => (
-              <div
-                key={index}
-                className={index % 2 === 0 || index % 7 === 0 ? 'rounded-sm bg-slate-950' : 'rounded-sm bg-white'}
-              />
-            ))}
-          </div>
+          {qrPayload ? (
+            <QRCodeSVG value={qrPayload} size={190} level="M" includeMargin />
+          ) : (
+            <RefreshCw className="h-8 w-8 animate-spin text-slate-400" />
+          )}
         </div>
 
-        <p className="mt-4 break-all rounded-2xl bg-slate-100 p-3 text-center text-xs font-bold text-slate-500">
-          {qrPayload || 'Generating QR payload...'}
+        <p className="mt-4 truncate rounded-2xl bg-slate-100 p-3 text-center text-xs font-bold text-slate-500">
+          {shortenedPaymentLink || 'Generating payment link...'}
         </p>
+
+        <Button
+          variant="outline"
+          className="mt-3 h-11 w-full rounded-xl border-orange-200 font-black"
+          disabled={!qrPayload}
+          onClick={copyPaymentLink}
+        >
+          {copied ? <Check className="mr-2 h-4 w-4" /> : <Copy className="mr-2 h-4 w-4" />}
+          {copied ? 'Copied' : 'Copy Payment Link'}
+        </Button>
 
         {error ? (
           <p className="mt-3 rounded-2xl bg-red-50 p-3 text-center text-xs font-bold text-red-700">{error}</p>

@@ -85,6 +85,8 @@ function CustomerPayContent() {
   const [decimals, setDecimals] = useState(18);
   const [allowance, setAllowance] = useState(0);
   const [balance, setBalance] = useState(0);
+  const [rawAllowance, setRawAllowance] = useState<bigint | null>(null);
+  const [rawBalance, setRawBalance] = useState<bigint | null>(null);
   const [step, setStep] = useState<Step>('idle');
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
   const [error, setError] = useState('');
@@ -99,6 +101,8 @@ function CustomerPayContent() {
   const network = params.get('network') || 'mezo-testnet';
   const musdAddress = process.env.NEXT_PUBLIC_MUSD_ADDRESS || '';
   const paymentContract = process.env.NEXT_PUBLIC_SHOPOS_PAYMENT_CONTRACT || '';
+  const merchantEnv = process.env.NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET || '';
+  const rpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL || '';
 
   const amountInUnits = useMemo(() => {
     try {
@@ -112,6 +116,12 @@ function CustomerPayContent() {
     hash: txHash
   });
 
+  const missingEnv = [
+    !musdAddress ? 'NEXT_PUBLIC_MUSD_ADDRESS' : '',
+    !paymentContract ? 'NEXT_PUBLIC_SHOPOS_PAYMENT_CONTRACT' : '',
+    !merchantEnv ? 'NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET' : '',
+    !rpcUrl ? 'NEXT_PUBLIC_SEPOLIA_RPC_URL' : ''
+  ].filter(Boolean);
   const hasRequiredParams = Boolean(paymentIntentId && orderId && paymentIntentIdBytes32 && orderIdBytes32 && merchant && amount > 0);
   const isWrongNetwork = isConnected && chainId !== mezoTestnet.id;
   const hasEnoughAllowance = allowance >= amount;
@@ -145,6 +155,8 @@ function CustomerPayContent() {
         })
       ]);
 
+      setRawAllowance(rawAllowance);
+      setRawBalance(rawBalance);
       setAllowance(Number(formatUnits(rawAllowance, Number(tokenDecimals))));
       setBalance(Number(formatUnits(rawBalance, Number(tokenDecimals))));
     } catch (err: any) {
@@ -186,8 +198,8 @@ function CustomerPayContent() {
 
   const approveMusd = async () => {
     setError('');
-    if (!paymentContract) {
-      setError('Missing NEXT_PUBLIC_SHOPOS_PAYMENT_CONTRACT.');
+    if (missingEnv.length > 0) {
+      setError(`Missing environment configuration: ${missingEnv.join(', ')}.`);
       return;
     }
     if (!hasEnoughBalance) {
@@ -212,8 +224,8 @@ function CustomerPayContent() {
 
   const payOrder = async () => {
     setError('');
-    if (!paymentContract) {
-      setError('Missing NEXT_PUBLIC_SHOPOS_PAYMENT_CONTRACT.');
+    if (missingEnv.length > 0) {
+      setError(`Missing environment configuration: ${missingEnv.join(', ')}.`);
       return;
     }
     if (!hasEnoughBalance) {
@@ -245,6 +257,7 @@ function CustomerPayContent() {
   const primaryAction = () => {
     if (!isConnected) return connectWallet();
     if (isWrongNetwork) return switchToMezo();
+    if (!hasEnoughBalance) return undefined;
     if (!hasEnoughAllowance) return approveMusd();
     return payOrder();
   };
@@ -253,9 +266,21 @@ function CustomerPayContent() {
     ? 'Connect Wallet'
     : isWrongNetwork
       ? 'Switch to Mezo Testnet'
+      : !hasEnoughBalance
+        ? 'Insufficient MUSD balance'
       : !hasEnoughAllowance
         ? 'Approve MUSD'
         : 'Pay MUSD';
+
+  const disablePrimary = isConnecting ||
+    loadingBalances ||
+    step === 'approving' ||
+    step === 'paying' ||
+    isConfirming ||
+    step === 'submitted' ||
+    step === 'confirmed' ||
+    !hasRequiredParams ||
+    (isConnected && !isWrongNetwork && !hasEnoughBalance);
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-5 text-slate-950">
@@ -273,10 +298,10 @@ function CustomerPayContent() {
         </div>
 
         <div className="rounded-3xl bg-white p-5 shadow-sm">
-          {!hasRequiredParams ? (
+          {missingEnv.length > 0 ? (
+            <StatusBox tone="error" text={`Missing environment configuration: ${missingEnv.join(', ')}.`} />
+          ) : !hasRequiredParams ? (
             <StatusBox tone="error" text="Invalid payment link. Missing payment intent details." />
-          ) : !paymentContract || !musdAddress ? (
-            <StatusBox tone="error" text="Missing payment contract or MUSD token environment configuration." />
           ) : (
             <>
               {isConnected ? (
@@ -298,7 +323,7 @@ function CustomerPayContent() {
 
               <Button
                 className="mt-4 h-12 w-full rounded-xl bg-orange-600 text-base font-black text-white hover:bg-red-950"
-                disabled={isConnecting || loadingBalances || step === 'approving' || step === 'paying' || isConfirming || step === 'submitted' || step === 'confirmed' || !hasRequiredParams}
+                disabled={disablePrimary}
                 onClick={primaryAction}
               >
                 {isConnecting || loadingBalances || step === 'approving' || step === 'paying' || isConfirming ? (
@@ -330,6 +355,24 @@ function CustomerPayContent() {
             {error}
           </div>
         ) : null}
+
+        <div className="rounded-3xl bg-white p-5 shadow-sm">
+          <p className="text-sm font-black text-slate-950">Diagnostics</p>
+          <div className="mt-3 space-y-2 rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-600">
+            <DebugRow label="connected wallet address" value={address || '-'} />
+            <DebugRow label="current chainId" value={chainId?.toString() || '-'} />
+            <DebugRow label="expected chainId" value="31611" />
+            <DebugRow label="MUSD contract address" value={musdAddress || '-'} />
+            <DebugRow label="ShopOSPayment contract address" value={paymentContract || '-'} />
+            <DebugRow label="merchant wallet" value={merchant || '-'} />
+            <DebugRow label="amountInUnits" value={amountInUnits.toString()} />
+            <DebugRow label="MUSD decimals" value={decimals.toString()} />
+            <DebugRow label="MUSD balance raw" value={rawBalance?.toString() || '-'} />
+            <DebugRow label="MUSD allowance raw" value={rawAllowance?.toString() || '-'} />
+            <DebugRow label="parsed balance" value={balance.toString()} />
+            <DebugRow label="parsed allowance" value={allowance.toString()} />
+          </div>
+        </div>
       </section>
     </main>
   );
@@ -349,6 +392,15 @@ function Metric({ label, value }: { label: string; value: string }) {
     <div className="rounded-2xl bg-slate-50 p-3">
       <p className="text-xs font-bold text-slate-500">{label}</p>
       <p className="mt-1 text-sm font-black text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function DebugRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[130px_minmax(0,1fr)] gap-2">
+      <span className="text-slate-400">{label}</span>
+      <span className="break-all text-slate-700">{value}</span>
     </div>
   );
 }
