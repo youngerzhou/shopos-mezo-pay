@@ -1,56 +1,29 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import {
-  BadgePercent,
   CheckCircle2,
-  Minus,
-  PackageSearch,
-  Plus,
   Printer,
-  QrCode,
   RefreshCw,
   ReceiptText,
-  ScanLine,
-  Settings,
-  ShoppingBag,
-  Trash2,
-  UserCheck,
-  User,
   Wallet
 } from 'lucide-react';
+import { CartBar } from '@/components/pos/CartBar';
+import { CategorySidebar } from '@/components/pos/CategorySidebar';
+import { mockCategories, mockProducts } from '@/components/pos/mock-data';
+import { ProductGrid } from '@/components/pos/ProductGrid';
+import { TopHeader } from '@/components/pos/TopHeader';
+import type { Product } from '@/components/pos/types';
 import { ContractInteraction } from '@/components/ContractInteraction';
 import { Scanner } from '@/components/Scanner';
 import { StaffQRModal } from '@/components/StaffQRModal';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Toaster } from '@/components/ui/toaster';
 import { useToast } from '@/hooks/use-toast';
 import { getPassportLevel } from '@/app/lib/passport';
 import { roundMoney2 } from '@/app/lib/money';
-
-interface Product {
-  id: string;
-  barcode: string;
-  sku: string;
-  name: string;
-  category?: string;
-  brand?: string;
-  color?: string;
-  size?: string;
-  price: number;
-  currency: string;
-  stock_qty: number;
-  image_url?: string;
-}
-
-interface CartItem {
-  product: Product;
-  qty: number;
-}
+import { usePosCartStore } from '@/store/pos-cart';
 
 interface PosOrderResult {
   order_id: string;
@@ -128,7 +101,8 @@ function formatReceiptDate(value?: string) {
 export default function ShoposHome() {
   const { toast } = useToast();
   const [scanInput, setScanInput] = useState('');
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [productSearch, setProductSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
   const [memberId, setMemberId] = useState<string | null>(null);
   const [membership, setMembership] = useState<Membership | null>(null);
   const [walletAddress, setWalletAddress] = useState('');
@@ -143,21 +117,41 @@ export default function ShoposHome() {
   const [staffId, setStaffId] = useState('STAFF001');
   const [staffName, setStaffName] = useState('Staff');
   const [showStaffQR, setShowStaffQR] = useState(false);
+  const cart = usePosCartStore((state) => state.items);
+  const subtotal = usePosCartStore((state) => state.subtotal);
+  const totalQuantity = usePosCartStore((state) => state.totalQuantity);
+  const addItem = usePosCartStore((state) => state.addItem);
+  const removeItem = usePosCartStore((state) => state.removeItem);
+  const increaseQty = usePosCartStore((state) => state.increaseQty);
+  const decreaseQty = usePosCartStore((state) => state.decreaseQty);
+  const clearCart = usePosCartStore((state) => state.clearCart);
 
   const passportLevel = useMemo(() => {
     if (!walletAddress.trim()) return 0;
     return getPassportLevel(walletAddress);
   }, [walletAddress]);
 
-  const subtotal = useMemo(
-    () => roundMoney2(cart.reduce((sum, item) => sum + Number(item.product.price) * item.qty, 0)),
-    [cart]
-  );
   const discount = useMemo(
     () => roundMoney2(subtotal * Number(membership?.discount_rate || 0)),
     [subtotal, membership]
   );
   const total = useMemo(() => roundMoney2(subtotal - discount), [subtotal, discount]);
+  const filteredProducts = useMemo(() => {
+    const query = productSearch.trim().toLowerCase();
+
+    return mockProducts.filter((product) => {
+      const matchesCategory = selectedCategory === 'all' || product.category === selectedCategory;
+      const matchesSearch = !query || [
+        product.name,
+        product.sku,
+        product.barcode,
+        product.brand,
+        product.category
+      ].some((value) => value?.toLowerCase().includes(query));
+
+      return matchesCategory && matchesSearch;
+    });
+  }, [productSearch, selectedCategory]);
 
   useEffect(() => {
     async function fetchSettings() {
@@ -200,17 +194,8 @@ export default function ShoposHome() {
   };
 
   const addProduct = (product: Product) => {
-    setCart((current) => {
-      const existing = current.find((item) => item.product.id === product.id);
-      if (existing) {
-        return current.map((item) =>
-          item.product.id === product.id
-            ? { ...item, qty: Math.min(item.qty + 1, Number(product.stock_qty)) }
-            : item
-        );
-      }
-      return [...current, { product, qty: 1 }];
-    });
+    addItem(product);
+    resetCheckoutState();
   };
 
   const lookupProduct = useCallback(async (barcode: string) => {
@@ -282,12 +267,23 @@ export default function ShoposHome() {
     }
   }, [lookupMembership, lookupProduct, toast]);
 
-  const updateQty = (productId: string, nextQty: number) => {
-    setCart((current) =>
-      current
-        .map((item) => item.product.id === productId ? { ...item, qty: nextQty } : item)
-        .filter((item) => item.qty > 0)
-    );
+  const removeCartItem = (productId: string) => {
+    removeItem(productId);
+    resetCheckoutState();
+  };
+
+  const increaseCartItem = (productId: string) => {
+    increaseQty(productId);
+    resetCheckoutState();
+  };
+
+  const decreaseCartItem = (productId: string) => {
+    decreaseQty(productId);
+    resetCheckoutState();
+  };
+
+  const clearCartItems = () => {
+    clearCart();
     resetCheckoutState();
   };
 
@@ -409,7 +405,7 @@ export default function ShoposHome() {
   };
 
   const resetAll = () => {
-    setCart([]);
+    clearCart();
     setMemberId(null);
     setMembership(null);
     setWalletAddress('');
@@ -561,222 +557,57 @@ export default function ShoposHome() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950">
+    <div className="min-h-screen bg-orange-50 text-slate-950">
       <Toaster />
-      <div className="mx-auto flex min-h-screen max-w-md flex-col bg-white shadow-2xl">
-        <header className="sticky top-0 z-30 border-b bg-white/90 p-4 backdrop-blur">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">SHOPOS Mezo</p>
-              <h1 className="text-2xl font-black tracking-tight">Scan & Checkout</h1>
-            </div>
-            <div className="flex gap-1 items-center">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="rounded-lg gap-2 text-slate-600 hover:bg-slate-100"
-                onClick={() => setShowStaffQR(true)}
-                title="Show staff QR code"
-              >
-                <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center">
-                  <User className="h-4 w-4 text-emerald-600" />
-                </div>
-                <span className="text-xs font-bold">{staffName}</span>
-              </Button>
-              <Link href="/admin/settings">
-                <Button variant="ghost" size="icon" className="rounded-full">
-                  <Settings className="h-4 w-4" />
-                </Button>
-              </Link>
-              <Button variant="ghost" size="icon" className="rounded-full" onClick={resetAll}>
-                <RefreshCw className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </header>
+      <TopHeader
+        scanInput={scanInput}
+        loading={loading}
+        isScanning={isScanning}
+        staffName={staffName}
+        memberLabel={membership ? `${membership.username || membership.referral_id} / ${membership.level_name}` : 'Guest'}
+        walletLabel={walletAddress || 'Wallet not scanned'}
+        onScanInputChange={setScanInput}
+        onSubmitScan={() => handleUniversalScan(scanInput)}
+        onOpenCamera={() => setIsScanning(true)}
+        onShowStaffQR={() => setShowStaffQR(true)}
+        onReset={resetAll}
+      />
 
-        <main className="flex-1 space-y-4 p-4 pb-32">
-          <Card className="rounded-lg border-slate-200 shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <ScanLine className="h-5 w-5 text-emerald-600" />
-                Universal Scan
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex gap-2">
-                <Input
-                  value={scanInput}
-                  onChange={(event) => setScanInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') handleUniversalScan(scanInput);
-                  }}
-                  placeholder="Barcode, member QR, or wallet address"
-                  className="h-12 rounded-lg"
-                />
-                <Button className="h-12 rounded-lg px-4" disabled={loading} onClick={() => handleUniversalScan(scanInput)}>
-                  {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <PackageSearch className="h-4 w-4" />}
-                </Button>
-              </div>
-              <Button
-                variant="outline"
-                className="h-12 w-full rounded-lg border-dashed font-black"
-                onClick={() => setIsScanning(true)}
-              >
-                <QrCode className="mr-2 h-4 w-4" />
-                Scan with Camera
-              </Button>
-              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs font-black uppercase tracking-wide text-slate-500">
-                <span>Camera status</span>
-                <span className={isScanning ? 'text-emerald-700' : 'text-slate-400'}>
-                  {isScanning ? 'Camera active' : 'Camera off'}
-                </span>
-              </div>
-              <p className="text-xs font-medium text-slate-400">Demo barcodes: SHOPOS100, SHOPOS500, SHOPOS1000</p>
-            </CardContent>
-          </Card>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-lg border border-slate-200 bg-white p-3">
-              <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase text-slate-400">
-                <UserCheck className="h-4 w-4" />
-                Member
-              </div>
-              <p className="truncate text-sm font-black">{membership?.username || 'Guest'}</p>
-              <p className="truncate text-[10px] font-bold text-slate-400">
-                {membership
-                  ? `${membership.referral_id} - ${membership.level_name} - ${(Number(membership.discount_rate || 0) * 100).toFixed(0)}% off - ${membership.total_spent.toFixed(2)} MUSD spent`
-                  : 'No member card'}
-              </p>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-white p-3">
-              <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase text-slate-400">
-                <Wallet className="h-4 w-4" />
-                Wallet
-              </div>
-              <p className="truncate text-sm font-black">{walletAddress || 'Not scanned'}</p>
-            </div>
-          </div>
-
-          <Card className="rounded-lg border-slate-200 shadow-sm">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <ShoppingBag className="h-5 w-5 text-slate-700" />
-                  Basket
-                </CardTitle>
-                <Badge className="bg-emerald-100 text-emerald-800">
-                  {membership ? `${membership.level_name} Member` : 'Guest Pricing'}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {cart.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm font-medium text-slate-400">
-                  Scan or type a product barcode to add clothing items.
-                </div>
-              ) : (
-                cart.map((item) => {
-                  const lineSubtotal = roundMoney2(Number(item.product.price) * item.qty);
-                  const lineDiscount = roundMoney2(lineSubtotal * Number(membership?.discount_rate || 0));
-                  const lineTotal = roundMoney2(lineSubtotal - lineDiscount);
-
-                  return (
-                    <div key={item.product.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                      <div className="flex gap-3">
-                        <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md bg-slate-200">
-                          {item.product.image_url ? (
-                            <img src={item.product.image_url} alt="" className="h-full w-full object-cover" />
-                          ) : null}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-black">{item.product.name}</p>
-                              <p className="text-xs font-medium text-slate-500">
-                                {item.product.color || '-'} / {item.product.size || '-'}
-                              </p>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 rounded-full text-slate-400"
-                              onClick={() => updateQty(item.product.id, 0)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-
-                          <div className="mt-3 flex items-center justify-between">
-                            <div className="flex items-center gap-1">
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8 rounded-full"
-                                onClick={() => updateQty(item.product.id, item.qty - 1)}
-                              >
-                                <Minus className="h-3 w-3" />
-                              </Button>
-                              <span className="w-8 text-center text-sm font-black">{item.qty}</span>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-8 w-8 rounded-full"
-                                onClick={() => updateQty(item.product.id, Math.min(item.qty + 1, Number(item.product.stock_qty)))}
-                              >
-                                <Plus className="h-3 w-3" />
-                              </Button>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-xs text-slate-500">{Number(item.product.price).toFixed(2)} MUSD each</p>
-                              <p className="text-sm font-black">{lineTotal.toFixed(2)} MUSD</p>
-                              {lineDiscount > 0 && (
-                                <p className="text-[10px] font-bold text-emerald-700">-{lineDiscount.toFixed(2)} member discount</p>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-lg border-slate-200 shadow-sm">
-            <CardContent className="space-y-3 p-4">
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-medium text-slate-500">Subtotal</span>
-                <span className="font-black">{subtotal.toFixed(2)} MUSD</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2 font-medium text-slate-500">
-                  <BadgePercent className="h-4 w-4 text-emerald-600" />
-                  Member Discount
-                </span>
-                <span className="font-black text-emerald-700">-{discount.toFixed(2)} MUSD</span>
-              </div>
-              <div className="flex items-end justify-between border-t pt-3">
-                <span className="font-black">Total</span>
-                <span className="text-3xl font-black tracking-tight">{total.toFixed(2)} MUSD</span>
-              </div>
-            </CardContent>
-          </Card>
+      <div className="mx-auto flex max-w-7xl">
+        <CategorySidebar
+          categories={mockCategories}
+          selectedCategory={selectedCategory}
+          onSelectCategory={setSelectedCategory}
+        />
+        <main className="min-w-0 flex-1">
+          <ProductGrid
+            products={filteredProducts}
+            searchValue={productSearch}
+            onSearchChange={setProductSearch}
+            onAddProduct={(product) => {
+              addProduct(product);
+              toast({
+                title: 'Product Added',
+                description: `${product.name} ${product.size || ''}`.trim()
+              });
+            }}
+          />
 
           {posOrder && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
+            <div className="mx-3 mb-32 rounded-lg border border-orange-200 bg-white p-3 text-sm font-bold text-orange-900 md:mx-5">
               {posOrder.order_no} ready. Total: {Number(posOrder.total_amount).toFixed(2)} {posOrder.currency}
             </div>
           )}
 
           {mezoOrder && (
-            <Card className="rounded-lg border-slate-200 shadow-sm">
-              <CardContent className="space-y-4 p-4">
-                <div className="flex items-center gap-2 text-sm font-black">
-                  <Wallet className="h-4 w-4 text-emerald-600" />
+            <Card className="mx-3 mb-32 rounded-lg border-orange-200 shadow-sm md:mx-5">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Wallet className="h-4 w-4 text-orange-700" />
                   Mezo MUSD Payment
-                </div>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 p-4 pt-0">
                 <ContractInteraction
                   orderId={mezoOrder.id}
                   amount={Number(mezoOrder.amount_musd)}
@@ -792,20 +623,24 @@ export default function ShoposHome() {
             </Card>
           )}
         </main>
-
-        {!mezoOrder && (
-          <div className="fixed inset-x-0 bottom-0 z-30 mx-auto max-w-md border-t bg-white p-4 shadow-2xl">
-            <Button
-              className="h-14 w-full rounded-lg bg-slate-950 text-base font-black text-white"
-              disabled={loading || cart.length === 0}
-              onClick={checkout}
-            >
-              {loading ? <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> : <Wallet className="mr-2 h-5 w-5" />}
-              Checkout
-            </Button>
-          </div>
-        )}
       </div>
+
+      {!mezoOrder && (
+        <CartBar
+          cart={cart}
+          subtotal={subtotal}
+          discount={discount}
+          total={total}
+          totalQuantity={totalQuantity}
+          loading={loading}
+          discountLabel={membership ? `${membership.level_name} pricing` : 'guest pricing'}
+          onRemoveItem={removeCartItem}
+          onIncreaseQty={increaseCartItem}
+          onDecreaseQty={decreaseCartItem}
+          onClearCart={clearCartItems}
+          onCheckout={checkout}
+        />
+      )}
 
       {isScanning && (
         <Scanner

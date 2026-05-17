@@ -271,6 +271,45 @@ export async function initDb() {
         price: 1000,
         stock_qty: 8,
         image_url: 'https://images.unsplash.com/photo-1543076447-215ad9ba6923?q=80&w=600&auto=format&fit=crop'
+      },
+      {
+        id: 'prod_demo_tote_cream',
+        barcode: 'SHOPOS200',
+        sku: 'MEZO-TOTE-CRM',
+        name: 'Canvas City Tote',
+        category: 'Bags',
+        brand: 'ShopOS',
+        color: 'Cream',
+        size: 'One Size',
+        price: 180,
+        stock_qty: 18,
+        image_url: 'https://images.unsplash.com/photo-1590874103328-eac38a683ce7?q=80&w=600&auto=format&fit=crop'
+      },
+      {
+        id: 'prod_demo_sneaker_white_42',
+        barcode: 'SHOPOS300',
+        sku: 'MEZO-SNK-WHT-42',
+        name: 'Everyday Leather Sneaker',
+        category: 'Shoes',
+        brand: 'ShopOS',
+        color: 'White',
+        size: '42',
+        price: 320,
+        stock_qty: 16,
+        image_url: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?q=80&w=600&auto=format&fit=crop'
+      },
+      {
+        id: 'prod_demo_cap_orange',
+        barcode: 'SHOPOS400',
+        sku: 'MEZO-CAP-ORG',
+        name: 'Orange Logo Cap',
+        category: 'Accessories',
+        brand: 'ShopOS',
+        color: 'Orange',
+        size: 'Adjustable',
+        price: 90,
+        stock_qty: 30,
+        image_url: 'https://images.unsplash.com/photo-1521369909029-2afed882baee?q=80&w=600&auto=format&fit=crop'
       }
     ];
 
