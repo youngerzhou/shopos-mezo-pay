@@ -303,7 +303,7 @@ export default function ShoposHome() {
     setIsCheckoutOpen(true);
   };
 
-  const checkout = async (_payload?: CheckoutPayload) => {
+  const checkout = async (payload?: CheckoutPayload) => {
     if (cart.length === 0) {
       toast({ variant: 'destructive', title: 'Cart Empty', description: 'Scan a product before checkout.' });
       return;
@@ -319,6 +319,7 @@ export default function ShoposHome() {
           shop_id: 'STORE_A',
           customer_referral_id: memberId,
           customer_wallet: walletAddress || null,
+          coupon_id: payload?.coupon?.id || null,
           passport_level: passportLevel,
           currency: 'MUSD',
           items: cart.map((item) => ({ barcode: item.product.barcode, qty: item.qty }))

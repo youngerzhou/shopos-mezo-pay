@@ -1,7 +1,6 @@
 "use client";
 
 import { Check } from 'lucide-react';
-import { COUPON_OPTIONS } from './checkout-options';
 import { BottomSheetFrame } from './BottomSheetFrame';
 import { formatMoney } from './format';
 import type { CouponOption } from './types';
@@ -10,12 +9,14 @@ interface CouponBottomSheetProps {
   open: boolean;
   hasMember: boolean;
   baseAmount: number;
+  coupons: CouponOption[];
+  loading?: boolean;
   selectedCouponId: string | null;
   onOpenChange: (open: boolean) => void;
   onSelect: (coupon: CouponOption | null) => void;
 }
 
-export function CouponBottomSheet({ open, hasMember, baseAmount, selectedCouponId, onOpenChange, onSelect }: CouponBottomSheetProps) {
+export function CouponBottomSheet({ open, hasMember, baseAmount, coupons, loading, selectedCouponId, onOpenChange, onSelect }: CouponBottomSheetProps) {
   return (
     <BottomSheetFrame open={open} title="Coupon" onOpenChange={onOpenChange}>
       <div className="space-y-3 px-4 pb-5 pt-3">
@@ -23,6 +24,10 @@ export function CouponBottomSheet({ open, hasMember, baseAmount, selectedCouponI
         {!hasMember ? (
           <div className="rounded-xl bg-slate-100 px-4 py-5 text-center text-sm font-bold text-slate-500">
             Guest checkout has no coupons.
+          </div>
+        ) : loading ? (
+          <div className="rounded-xl bg-slate-100 px-4 py-5 text-center text-sm font-bold text-slate-500">
+            Loading coupons...
           </div>
         ) : (
           <>
@@ -37,7 +42,12 @@ export function CouponBottomSheet({ open, hasMember, baseAmount, selectedCouponI
               No coupon
               {!selectedCouponId ? <Check className="h-4 w-4 text-orange-700" /> : null}
             </button>
-            {COUPON_OPTIONS.map((coupon) => {
+            {coupons.length === 0 ? (
+              <div className="rounded-xl bg-slate-100 px-4 py-5 text-center text-sm font-bold text-slate-500">
+                No coupons available.
+              </div>
+            ) : null}
+            {coupons.map((coupon) => {
               const available = baseAmount >= coupon.minSubtotal;
               const selected = selectedCouponId === coupon.id;
 

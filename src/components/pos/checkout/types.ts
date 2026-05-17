@@ -32,6 +32,8 @@ export interface CouponOption {
   label: string;
   minSubtotal: number;
   amount: number;
+  type?: string;
+  expiresAt?: string;
 }
 
 export interface SalespersonOption {

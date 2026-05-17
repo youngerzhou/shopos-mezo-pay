@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSql, ensureDb } from '@/app/lib/db';
+import { getSql, ensureDb, issueFastPayAuthorizationCoupon } from '@/app/lib/db';
 import { getOnChainAllowance } from '@/app/lib/mezo-pull-payment';
 
 export const dynamic = 'force-dynamic';
@@ -117,16 +117,28 @@ export async function POST(req: NextRequest) {
                 const customer = existing[0];
                 if (customer.fast_pay_enabled && customer.fast_pay_allowance === allowanceAmount) {
                     console.log('Backend: Fast pay already enabled with same allowance, skipping update');
+                    const issuedCoupon = await issueFastPayAuthorizationCoupon(
+                        customer.wallet_address,
+                        allowanceAmount,
+                        txHash || `ALLOWANCE_${allowanceAmount}`
+                    );
                     return NextResponse.json({
                         success: true,
+                        issued_coupon: issuedCoupon,
                         customer: customer,
                         message: 'Fast pay already enabled with this allowance'
                     });
                 }
                 if (txHash && customer.fast_pay_tx_hash === txHash) {
                     console.log('Backend: Fast pay tx_hash already processed, skipping update');
+                    const issuedCoupon = await issueFastPayAuthorizationCoupon(
+                        customer.wallet_address,
+                        allowanceAmount,
+                        txHash
+                    );
                     return NextResponse.json({
                         success: true,
+                        issued_coupon: issuedCoupon,
                         customer: customer,
                         message: 'Fast pay transaction already processed'
                     });
@@ -144,9 +156,15 @@ export async function POST(req: NextRequest) {
             if (result.length === 0) {
                 return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
             }
+            const issuedCoupon = await issueFastPayAuthorizationCoupon(
+                result[0].wallet_address,
+                onChainAllowanceMusd,
+                txHash || `ALLOWANCE_${onChainAllowanceMusd}`
+            );
 
             return NextResponse.json({
                 success: true,
+                issued_coupon: issuedCoupon,
                 customer: {
                     ...result[0],
                     fast_pay_authorized: !!result[0].fast_pay_enabled
@@ -180,6 +198,13 @@ export async function POST(req: NextRequest) {
         WHERE referral_id = ${referral_id}
         RETURNING id, username, contact_info, referral_id, wallet_address, identity_verified, identity_signature, verified_at, fast_pay_enabled, fast_pay_allowance, fast_pay_tx_hash, created_at
       `;
+            const issuedCoupon = fastPayEnabled
+                ? await issueFastPayAuthorizationCoupon(
+                    result[0].wallet_address,
+                    onChainAllowanceMusd,
+                    txHash || `ALLOWANCE_${onChainAllowanceMusd}`
+                )
+                : null;
 
             console.log('[Backend/verify] Synced Fast Pay after customer allowance refresh', {
                 referral_id,
@@ -192,6 +217,7 @@ export async function POST(req: NextRequest) {
 
             return NextResponse.json({
                 success: true,
+                issued_coupon: issuedCoupon,
                 customer: {
                     ...result[0],
                     fast_pay_authorized: fastPayEnabled

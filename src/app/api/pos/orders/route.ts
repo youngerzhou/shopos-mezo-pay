@@ -12,6 +12,7 @@ export async function POST(req: NextRequest) {
       shopId: body.shop_id,
       customerReferralId: body.customer_referral_id,
       customerWallet: body.customer_wallet,
+      couponId: body.coupon_id,
       passportLevel: body.passport_level,
       currency: body.currency,
       items: body.items

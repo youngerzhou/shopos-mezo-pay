@@ -35,6 +35,7 @@ export interface CreatePosOrderPayload {
   shopId?: string;
   customerReferralId?: string;
   customerWallet?: string;
+  couponId?: string | null;
   passportLevel?: 0 | 1 | 2 | 3;
   currency?: string;
   items: PosOrderItemInput[];
@@ -62,6 +63,20 @@ export interface CustomerMembership {
   level_name: string;
   discount_rate: number;
   min_spend_amount: number;
+}
+
+export interface UserCoupon {
+  id: string;
+  customer_wallet: string;
+  coupon_type: 'threshold_discount' | 'cash_discount' | string;
+  title: string;
+  discount_amount: number;
+  minimum_spend: number;
+  status: 'unused' | 'used' | 'expired' | string;
+  source: 'NEW_MEMBER_SIGNUP' | 'FAST_PAY_AUTHORIZED' | string;
+  source_ref: string;
+  created_at?: any;
+  expires_at: any;
 }
 
 /**
@@ -167,6 +182,10 @@ export async function initDb() {
 
     // Phase 1 FIX: Ensure wallet_address is nullable in customers table for new dual-scan workflow
     await sql(`ALTER TABLE customers ALTER COLUMN wallet_address DROP NOT NULL`);
+    await sql(`
+      CREATE UNIQUE INDEX IF NOT EXISTS user_coupons_wallet_source_ref_idx
+      ON user_coupons (LOWER(customer_wallet), source, source_ref)
+    `);
 
     // Seed a demo staff member if none exists
     const demoStaff = await sql`SELECT 1 FROM staff WHERE staff_id = 'STAFF001'`;
@@ -454,6 +473,150 @@ export async function getProductByBarcode(barcode: string) {
   return results[0];
 }
 
+function normalizeWalletAddress(walletAddress: string) {
+  return walletAddress.toLowerCase().trim();
+}
+
+function couponExpiry(days = 90) {
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + days);
+  return expiresAt.toISOString();
+}
+
+export async function issueNewMemberCoupon(customerWallet?: string | null): Promise<UserCoupon | null> {
+  if (!customerWallet) return null;
+
+  await ensureDb();
+  const sql = getSql();
+  const wallet = normalizeWalletAddress(customerWallet);
+  const id = `cpn_new_${Math.random().toString(36).substring(2, 10)}`;
+  const results = await sql`
+    INSERT INTO user_coupons (
+      id, customer_wallet, coupon_type, title, discount_amount, minimum_spend,
+      status, source, source_ref, expires_at
+    )
+    VALUES (
+      ${id}, ${wallet}, 'threshold_discount', '新会员满100减5', 5, 100,
+      'unused', 'NEW_MEMBER_SIGNUP', 'NEW_MEMBER_SIGNUP', ${couponExpiry()}
+    )
+    ON CONFLICT DO NOTHING
+    RETURNING
+      id, customer_wallet, coupon_type, title,
+      discount_amount::float, minimum_spend::float,
+      status, source, source_ref, created_at, expires_at
+  `;
+
+  if (results[0]) return results[0] as UserCoupon;
+
+  const existing = await sql`
+    SELECT
+      id, customer_wallet, coupon_type, title,
+      discount_amount::float, minimum_spend::float,
+      status, source, source_ref, created_at, expires_at
+    FROM user_coupons
+    WHERE LOWER(customer_wallet) = ${wallet}
+    AND source = 'NEW_MEMBER_SIGNUP'
+    AND source_ref = 'NEW_MEMBER_SIGNUP'
+    LIMIT 1
+  `;
+  return (existing[0] as UserCoupon) || null;
+}
+
+export async function issueFastPayAuthorizationCoupon(
+  customerWallet?: string | null,
+  authorizedAmount?: number,
+  sourceRef?: string | null
+): Promise<UserCoupon | null> {
+  if (!customerWallet) return null;
+
+  const allowance = roundMoney2(Number(authorizedAmount || 0));
+  if (!Number.isFinite(allowance) || allowance <= 0) return null;
+
+  await ensureDb();
+  const sql = getSql();
+  const wallet = normalizeWalletAddress(customerWallet);
+  const ref = sourceRef?.trim() || `ALLOWANCE_${allowance}`;
+  const discountAmount = roundMoney2(allowance * 0.01);
+  const id = `cpn_fp_${Math.random().toString(36).substring(2, 10)}`;
+
+  const results = await sql`
+    INSERT INTO user_coupons (
+      id, customer_wallet, coupon_type, title, discount_amount, minimum_spend,
+      status, source, source_ref, expires_at
+    )
+    VALUES (
+      ${id}, ${wallet}, 'cash_discount', 'Fast Pay 授权奖励券', ${discountAmount}, 0,
+      'unused', 'FAST_PAY_AUTHORIZED', ${ref}, ${couponExpiry()}
+    )
+    ON CONFLICT DO NOTHING
+    RETURNING
+      id, customer_wallet, coupon_type, title,
+      discount_amount::float, minimum_spend::float,
+      status, source, source_ref, created_at, expires_at
+  `;
+
+  if (results[0]) return results[0] as UserCoupon;
+
+  const existing = await sql`
+    SELECT
+      id, customer_wallet, coupon_type, title,
+      discount_amount::float, minimum_spend::float,
+      status, source, source_ref, created_at, expires_at
+    FROM user_coupons
+    WHERE LOWER(customer_wallet) = ${wallet}
+    AND source = 'FAST_PAY_AUTHORIZED'
+    AND source_ref = ${ref}
+    LIMIT 1
+  `;
+  return (existing[0] as UserCoupon) || null;
+}
+
+export async function getAvailableCoupons(customerWallet: string, orderAmount?: number): Promise<UserCoupon[]> {
+  await ensureDb();
+  const sql = getSql();
+  const wallet = normalizeWalletAddress(customerWallet);
+  const amount = orderAmount == null ? null : roundMoney2(Number(orderAmount));
+
+  const results = await sql`
+    SELECT
+      id, customer_wallet, coupon_type, title,
+      discount_amount::float, minimum_spend::float,
+      status, source, source_ref, created_at, expires_at
+    FROM user_coupons
+    WHERE LOWER(customer_wallet) = ${wallet}
+    AND status = 'unused'
+    AND expires_at > CURRENT_TIMESTAMP
+    AND (${amount}::decimal IS NULL OR minimum_spend <= ${amount})
+    ORDER BY discount_amount DESC, created_at ASC
+  `;
+  return results as UserCoupon[];
+}
+
+async function validateCouponForOrder(couponId: string, customerWallet: string, payableAmount: number) {
+  const sql = getSql();
+  const wallet = normalizeWalletAddress(customerWallet);
+  const amount = roundMoney2(payableAmount);
+
+  const results = await sql`
+    SELECT
+      id, customer_wallet, coupon_type, title,
+      discount_amount::float, minimum_spend::float,
+      status, source, source_ref, created_at, expires_at
+    FROM user_coupons
+    WHERE id = ${couponId}
+    LIMIT 1
+  `;
+
+  const coupon = results[0] as UserCoupon | undefined;
+  if (!coupon) throw new Error('Coupon not found');
+  if (normalizeWalletAddress(coupon.customer_wallet) !== wallet) throw new Error('Coupon does not belong to this customer');
+  if (coupon.status !== 'unused') throw new Error('Coupon is not available');
+  if (new Date(coupon.expires_at).getTime() <= Date.now()) throw new Error('Coupon has expired');
+  if (amount < Number(coupon.minimum_spend || 0)) throw new Error('Order amount does not meet coupon minimum spend');
+
+  return coupon;
+}
+
 export async function createPosOrder(payload: CreatePosOrderPayload) {
   await ensureDb();
   const sql = getSql();
@@ -509,14 +672,26 @@ export async function createPosOrder(payload: CreatePosOrderPayload) {
     });
   }
 
-  const totalAmount = roundMoney2(subtotal - discountAmount);
   const normalizedWallet = payload.customerWallet ? payload.customerWallet.toLowerCase().trim() : null;
+  let couponId = payload.couponId?.trim() || null;
+  let couponDiscountAmount = 0;
+
+  if (couponId) {
+    if (!normalizedWallet) {
+      throw new Error('Customer wallet is required to use coupon');
+    }
+
+    const coupon = await validateCouponForOrder(couponId, normalizedWallet, roundMoney2(subtotal - discountAmount));
+    couponDiscountAmount = roundMoney2(Math.min(Number(coupon.discount_amount || 0), roundMoney2(subtotal - discountAmount)));
+  }
+
+  const totalAmount = roundMoney2(subtotal - discountAmount - couponDiscountAmount);
 
   await sql`
     INSERT INTO pos_orders (
       id, order_no, shop_id, customer_referral_id, customer_wallet, passport_level,
       member_level_code, member_level_name, member_discount_rate,
-      subtotal, discount_amount, total_amount, currency, payment_status
+      subtotal, discount_amount, coupon_id, coupon_discount_amount, total_amount, currency, payment_status
     )
     VALUES (
       ${orderId},
@@ -530,6 +705,8 @@ export async function createPosOrder(payload: CreatePosOrderPayload) {
       ${discountRate},
       ${subtotal},
       ${discountAmount},
+      ${couponId},
+      ${couponDiscountAmount},
       ${totalAmount},
       ${currency},
       'pending'
@@ -570,7 +747,9 @@ export async function createPosOrder(payload: CreatePosOrderPayload) {
     currency,
     member_level_code: membership?.level_code || null,
     member_level_name: membership?.level_name || null,
-    member_discount_rate: discountRate
+    member_discount_rate: discountRate,
+    coupon_id: couponId,
+    coupon_discount_amount: couponDiscountAmount
   };
 }
 
@@ -588,6 +767,7 @@ export async function markPosOrderPaid(orderId: string, txHash: string) {
       id,
       order_no,
       customer_referral_id,
+      coupon_id,
       total_amount::float,
       currency,
       payment_status,
@@ -600,6 +780,7 @@ export async function markPosOrderPaid(orderId: string, txHash: string) {
         id,
         order_no,
         customer_referral_id,
+        coupon_id,
         total_amount::float,
         currency,
         payment_status,
@@ -623,6 +804,17 @@ export async function markPosOrderPaid(orderId: string, txHash: string) {
 
   const order = updated[0];
   let membership = null;
+
+  if (order.coupon_id) {
+    await sql`
+      UPDATE user_coupons
+      SET status = 'used',
+          used_order_id = ${order.id},
+          used_at = CURRENT_TIMESTAMP
+      WHERE id = ${order.coupon_id}
+      AND status = 'unused'
+    `;
+  }
 
   if (order.customer_referral_id) {
     const current = await sql`
@@ -758,6 +950,9 @@ export async function createCustomer(referral_id: string, level: number = 1, ref
       wallet_address = COALESCE(customers.wallet_address, EXCLUDED.wallet_address)
     RETURNING *
   `;
+  if (results[0]?.wallet_address) {
+    await issueNewMemberCoupon(results[0].wallet_address);
+  }
   return results[0];
 }
 
@@ -772,6 +967,9 @@ export async function bindWalletToCustomer(referral_id: string, wallet_address: 
     WHERE referral_id = ${referral_id} AND wallet_address IS NULL
     RETURNING *
   `;
+  if (results[0]?.wallet_address) {
+    await issueNewMemberCoupon(results[0].wallet_address);
+  }
   return results[0];
 }
 

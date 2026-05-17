@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { roundMoney2 } from '@/app/lib/money';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,7 @@ import {
 import type { CartItem } from '../types';
 import { CheckoutItemList } from './CheckoutItemList';
 import { CheckoutSettingList } from './CheckoutSettingList';
-import { COUPON_OPTIONS, DISCOUNT_OPTIONS, POS_PAYMENT_METHODS, SALESPERSON_OPTIONS } from './checkout-options';
+import { DISCOUNT_OPTIONS, POS_PAYMENT_METHODS, SALESPERSON_OPTIONS } from './checkout-options';
 import { CouponBottomSheet } from './CouponBottomSheet';
 import { DiscountBottomSheet } from './DiscountBottomSheet';
 import { discountLabel, formatMoney, saleDateLabel } from './format';
@@ -49,6 +49,8 @@ export function MobileCheckoutSheet({
   const [memberExpanded, setMemberExpanded] = useState(false);
   const [selectedDiscount, setSelectedDiscount] = useState<DiscountOption>(DISCOUNT_OPTIONS[0]);
   const [selectedCoupon, setSelectedCoupon] = useState<CouponOption | null>(null);
+  const [coupons, setCoupons] = useState<CouponOption[]>([]);
+  const [couponsLoading, setCouponsLoading] = useState(false);
   const [pointsDeduction, setPointsDeduction] = useState(0);
   const [salesperson, setSalesperson] = useState<SalespersonOption>(SALESPERSON_OPTIONS[0]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodId>('cash');
@@ -81,7 +83,54 @@ export function MobileCheckoutSheet({
   const appliedPointsDeduction = roundMoney2(Math.min(pointsDeduction, allowedPointsDeduction, afterCoupon));
   const pointsRedeemed = appliedPointsDeduction > 0 ? Math.floor(appliedPointsDeduction * 100) : 0;
   const finalTotal = roundMoney2(Math.max(afterCoupon - appliedPointsDeduction, 0));
-  const availableCouponCount = member ? COUPON_OPTIONS.filter((coupon) => afterOrderDiscount >= coupon.minSubtotal).length : 0;
+  const availableCouponCount = member ? coupons.filter((coupon) => afterOrderDiscount >= coupon.minSubtotal).length : 0;
+
+  useEffect(() => {
+    if (!member?.walletAddress) {
+      setCoupons([]);
+      setSelectedCoupon(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    async function fetchCoupons() {
+      setCouponsLoading(true);
+      try {
+        const params = new URLSearchParams({
+          wallet: String(member?.walletAddress || ''),
+          amount: String(afterOrderDiscount)
+        });
+        const res = await fetch(`/api/customers/coupons?${params.toString()}`, {
+          cache: 'no-store',
+          signal: controller.signal
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Unable to load coupons');
+
+        const nextCoupons = (data.coupons || []).map((coupon: any) => ({
+          id: coupon.id,
+          label: coupon.title,
+          minSubtotal: Number(coupon.minimum_spend || 0),
+          amount: Number(coupon.discount_amount || 0),
+          type: coupon.coupon_type,
+          expiresAt: coupon.expires_at
+        }));
+        setCoupons(nextCoupons);
+        setSelectedCoupon((current) => current && nextCoupons.some((coupon: CouponOption) => coupon.id === current.id) ? current : null);
+      } catch (error: any) {
+        if (error.name !== 'AbortError') {
+          console.error('Failed to load coupons:', error);
+          setCoupons([]);
+          setSelectedCoupon(null);
+        }
+      } finally {
+        setCouponsLoading(false);
+      }
+    }
+
+    fetchCoupons();
+    return () => controller.abort();
+  }, [member?.walletAddress, afterOrderDiscount]);
 
   const couponLabel = !member
     ? 'Guest has no coupons'
@@ -335,6 +384,8 @@ export function MobileCheckoutSheet({
         open={activeSheet === 'coupon'}
         hasMember={Boolean(member)}
         baseAmount={afterOrderDiscount}
+        coupons={coupons}
+        loading={couponsLoading}
         selectedCouponId={validCoupon?.id || null}
         onOpenChange={(nextOpen) => setActiveSheet(nextOpen ? 'coupon' : null)}
         onSelect={setSelectedCoupon}

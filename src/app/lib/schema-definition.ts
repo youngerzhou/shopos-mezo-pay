@@ -46,6 +46,21 @@ export const SCHEMA_DEFINITION = {
     total_spent: "DECIMAL NOT NULL DEFAULT 0",
     created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
   },
+  user_coupons: {
+    id: "TEXT PRIMARY KEY",
+    customer_wallet: "TEXT NOT NULL",
+    coupon_type: "TEXT NOT NULL",
+    title: "TEXT NOT NULL",
+    discount_amount: "DECIMAL NOT NULL",
+    minimum_spend: "DECIMAL NOT NULL DEFAULT 0",
+    status: "TEXT NOT NULL DEFAULT 'unused'",
+    source: "TEXT NOT NULL",
+    source_ref: "TEXT NOT NULL",
+    used_order_id: "TEXT",
+    used_at: "TIMESTAMP",
+    created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    expires_at: "TIMESTAMP NOT NULL"
+  },
   member_levels: {
     id: "TEXT PRIMARY KEY",
     level_code: "TEXT UNIQUE NOT NULL",
@@ -121,6 +136,8 @@ export const SCHEMA_DEFINITION = {
     member_discount_rate: "DECIMAL DEFAULT 0",
     subtotal: "DECIMAL NOT NULL DEFAULT 0",
     discount_amount: "DECIMAL NOT NULL DEFAULT 0",
+    coupon_id: "TEXT",
+    coupon_discount_amount: "DECIMAL NOT NULL DEFAULT 0",
     total_amount: "DECIMAL NOT NULL DEFAULT 0",
     currency: "TEXT NOT NULL DEFAULT 'MUSD'",
     payment_status: "TEXT NOT NULL DEFAULT 'pending'",
