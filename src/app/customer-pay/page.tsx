@@ -199,7 +199,8 @@ function CustomerPayContent() {
   const [tokenSymbol, setTokenSymbol] = useState('');
   const [tokenConfigInvalid, setTokenConfigInvalid] = useState(false);
   const [step, setStep] = useState<Step>('idle');
-  const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
+  const [approvalTxHash, setApprovalTxHash] = useState<`0x${string}` | undefined>();
+  const [paymentTxHash, setPaymentTxHash] = useState<`0x${string}` | undefined>();
   const [error, setError] = useState('');
   const [loadingBalances, setLoadingBalances] = useState(false);
   const [needsApproval, setNeedsApproval] = useState(false);
@@ -234,8 +235,12 @@ function CustomerPayContent() {
     }
   }, [amount, decimals]);
 
-  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
-    hash: txHash
+  const { isLoading: isApprovalConfirming, isSuccess: isApprovalConfirmed } = useWaitForTransactionReceipt({
+    hash: approvalTxHash
+  });
+
+  const { isLoading: isPaymentConfirming, isSuccess: isPaymentConfirmed } = useWaitForTransactionReceipt({
+    hash: paymentTxHash
   });
 
   const missingEnv = [
@@ -528,11 +533,25 @@ function CustomerPayContent() {
     }
   }, [isConnected, isWrongNetwork, loadTokenState]);
 
+  const hasEnoughAllowance = tokenDiagnostics.hasEnoughAllowance === 'yes';
+
   useEffect(() => {
-    if (isConfirmed && (step === 'paying' || step === 'submitted')) {
+    if (isPaymentConfirmed && (step === 'paying' || step === 'submitted')) {
       setStep('confirmed');
     }
-  }, [isConfirmed, step]);
+  }, [isPaymentConfirmed, step]);
+
+  useEffect(() => {
+    if (isApprovalConfirmed) {
+      loadTokenState();
+    }
+  }, [isApprovalConfirmed, loadTokenState]);
+
+  useEffect(() => {
+    if (hasEnoughAllowance && step === 'approving') {
+      setStep('idle');
+    }
+  }, [hasEnoughAllowance, step]);
 
   const connectWallet = () => {
     // Use ConnectKit modal to show wallet selector (same as register page)
@@ -573,7 +592,7 @@ function CustomerPayContent() {
         functionName: 'approve',
         args: [paymentContract as `0x${string}`, amountInUnits]
       });
-      setTxHash(hash);
+      setApprovalTxHash(hash);
       
       console.log('[CustomerPay] Approval transaction submitted:', {
         paymentMode: 'qr-contract-payment-mode-2',
@@ -618,7 +637,7 @@ function CustomerPayContent() {
           amountInUnits
         ]
       });
-      setTxHash(hash);
+      setPaymentTxHash(hash);
       setStep('submitted');
       
       console.log('[PaymentIntentIdentity] customer-pay contract args', {
@@ -661,18 +680,19 @@ function CustomerPayContent() {
         ? 'Token diagnostics failed'
         : !hasEnoughBalance
         ? 'Insufficient MUSD balance'
-        : step === 'approving'
+        : step === 'approving' && !hasEnoughAllowance
         ? 'Approving...'
         : step === 'paying'
         ? 'Paying...'
         : needsApproval
         ? 'Approve MUSD'
-        : 'Pay with MUSD';
+        : 'Pay MUSD';
 
   const disablePrimary =
     loadingBalances ||
+    (step === 'approving' && !hasEnoughAllowance) ||
     step === 'paying' ||
-    isConfirming ||
+    isPaymentConfirming ||
     step === 'submitted' ||
     step === 'confirmed' ||
     !hasRequiredParams ||
@@ -733,7 +753,7 @@ function CustomerPayContent() {
                 disabled={disablePrimary}
                 onClick={primaryAction}
               >
-                {loadingBalances || step === 'paying' || isConfirming ? (
+                {loadingBalances || step === 'approving' || step === 'paying' || isPaymentConfirming ? (
                   <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   <Wallet className="mr-2 h-4 w-4" />
@@ -753,15 +773,26 @@ function CustomerPayContent() {
           )}
         </div>
 
-        {txHash ? (
+        {approvalTxHash ? (
           <div className="rounded-3xl bg-white p-5 shadow-sm">
-            <p className="text-sm font-black text-slate-950">Transaction</p>
-            <p className="mt-2 break-all rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-600">{txHash}</p>
-            {step === 'submitted' || isConfirming ? <StatusBox tone="warn" text="Waiting for blockchain confirmation..." /> : null}
+            <p className="text-sm font-black text-slate-950">Approval Transaction</p>
+            <p className="mt-2 break-all rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-600">{approvalTxHash}</p>
+            {isApprovalConfirming && !hasEnoughAllowance ? <StatusBox tone="warn" text="Waiting for allowance confirmation..." /> : null}
+            {hasEnoughAllowance ? <StatusBox tone="success" text="MUSD approval ready" /> : null}
+          </div>
+        ) : null}
+
+        {paymentTxHash ? (
+          <div className="rounded-3xl bg-white p-5 shadow-sm">
+            <p className="text-sm font-black text-slate-950">Payment Transaction</p>
+            <p className="mt-2 break-all rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-600">{paymentTxHash}</p>
+            {step === 'submitted' || isPaymentConfirming ? <StatusBox tone="warn" text="Waiting for blockchain confirmation..." /> : null}
             {step === 'confirmed' ? <StatusBox tone="success" text="Payment Submitted" /> : null}
-            <p className="mt-3 text-xs font-bold text-slate-500">
-              The POS will be confirmed automatically by the Goldsky webhook after the OrderPaid event is indexed.
-            </p>
+            {step === 'submitted' || step === 'confirmed' || isPaymentConfirming ? (
+              <p className="mt-3 text-xs font-bold text-slate-500">
+                The POS will be confirmed automatically by the Goldsky webhook after the OrderPaid event is indexed.
+              </p>
+            ) : null}
           </div>
         ) : null}
 
