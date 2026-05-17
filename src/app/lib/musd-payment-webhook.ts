@@ -3,6 +3,7 @@ import { MUSD_ADDRESSES } from '@/app/lib/mezo-config';
 import {
   findPaymentIntentByOrderId,
   findPaymentIntentByPaymentIntentIdOrBytes32,
+  fromBytes32String,
   getPaymentIntent,
   hasTxHash,
   markPaymentIntentConfirmed
@@ -126,8 +127,8 @@ function toNumberAmount(value: any) {
 
 function normalizeDecodedArgs(args: any, rawEvent: unknown): NormalizedGoldskyOrderPaidEvent {
   return {
-    paymentIntentId: String(args.paymentIntentId || ''),
-    orderId: String(args.orderId || ''),
+    paymentIntentId: fromBytes32String(String(args.paymentIntentId || '')),
+    orderId: fromBytes32String(String(args.orderId || '')),
     merchant: args.merchant,
     payerWallet: args.payer,
     token: args.token,
@@ -170,8 +171,8 @@ function tryDecodeLog(event: any): NormalizedGoldskyOrderPaidEvent | null {
         data
       );
       const normalized = {
-        paymentIntentId: topics[1] || '',
-        orderId: topics[2] || '',
+        paymentIntentId: fromBytes32String(topics[1] || ''),
+        orderId: fromBytes32String(topics[2] || ''),
         merchant: topicToAddress(topics[3]),
         payerWallet: payer,
         token,
@@ -209,8 +210,8 @@ export function normalizeGoldskyOrderPaidEvent(payload: unknown): NormalizedGold
 
     const args = event?.args || event?.decoded || event?.event || event;
     const normalized = {
-      paymentIntentId: String(pick(args, ['paymentIntentId', 'payment_intent_id', 'paymentIntentIdBytes32']) || ''),
-      orderId: String(pick(args, ['orderId', 'order_id', 'orderIdBytes32']) || ''),
+      paymentIntentId: fromBytes32String(String(pick(args, ['paymentIntentId', 'payment_intent_id', 'paymentIntentIdBytes32']) || '')),
+      orderId: fromBytes32String(String(pick(args, ['orderId', 'order_id', 'orderIdBytes32']) || '')),
       merchant: String(pick(args, ['merchant']) || ''),
       payerWallet: String(pick(args, ['payer', 'payerWallet', 'payer_wallet']) || ''),
       token: String(pick(args, ['token']) || ''),
@@ -242,6 +243,14 @@ export async function processMusdOrderPaidWebhook(payload: unknown) {
   console.log('[GoldskyWebhook] decoded OrderPaid events', JSON.stringify(normalizedEvents, null, 2));
 
   for (const event of normalizedEvents) {
+    console.log('[PaymentIntentIdentity] webhook lookup input', {
+      decodedPaymentIntentId: event.paymentIntentId || '',
+      decodedOrderId: event.orderId || '',
+      txHash: event.txHash || '',
+      amountMUSD: event.amountMUSD,
+      token: event.token || '',
+      merchant: event.merchant || ''
+    });
     const intent = event.paymentIntentId
       ? findPaymentIntentByPaymentIntentIdOrBytes32(event.paymentIntentId)
       : event.orderId
@@ -249,9 +258,23 @@ export async function processMusdOrderPaidWebhook(payload: unknown) {
         : null;
 
     if (!intent) {
-      errors.push(`Payment intent not found for paymentIntentId=${event.paymentIntentId || '-'} orderId=${event.orderId || '-'}`);
+      errors.push(`unmatched_payment_event: paymentIntentId=${event.paymentIntentId || 'missing'} orderId=${event.orderId || 'missing'} txHash=${event.txHash || 'missing'}`);
+      console.warn('[PaymentIntentIdentity] webhook lookup missed', {
+        decodedPaymentIntentId: event.paymentIntentId || '',
+        decodedOrderId: event.orderId || '',
+        txHash: event.txHash || '',
+        result: 'unmatched_payment_event'
+      });
       continue;
     }
+    console.log('[PaymentIntentIdentity] webhook lookup matched', {
+      decodedPaymentIntentId: event.paymentIntentId || '',
+      decodedOrderId: event.orderId || '',
+      paymentIntentId: intent.id,
+      paymentRef: intent.id,
+      orderId: intent.orderId,
+      status: intent.status
+    });
     if (intent.status === 'confirmed') {
       errors.push(`Payment intent already confirmed: ${intent.id}`);
       continue;

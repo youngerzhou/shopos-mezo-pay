@@ -621,6 +621,15 @@ function CustomerPayContent() {
       setTxHash(hash);
       setStep('submitted');
       
+      console.log('[PaymentIntentIdentity] customer-pay contract args', {
+        paymentIntentId,
+        paymentRef: paymentIntentId,
+        orderId,
+        amount,
+        paymentIntentIdBytes32,
+        orderIdBytes32,
+        contractFunction: 'ShopOSPayment.payOrder'
+      });
       console.log('[CustomerPay] Payment transaction submitted:', {
         paymentMode: 'qr-contract-payment-mode-2',
         paymentContract,

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { keccak256, toBytes } from 'viem';
+import { hexToString, isHex, keccak256, padHex, stringToHex, toBytes } from 'viem';
 import { roundMoney2 } from '@/app/lib/money';
 
 export type PaymentIntentStatus = 'pending' | 'detected' | 'confirmed' | 'expired' | 'failed';
@@ -47,9 +47,30 @@ function makeId(prefix: string) {
   return `${prefix}_${randomUUID().replace(/-/g, '').slice(0, 16).toUpperCase()}`;
 }
 
-export function toStableBytes32(value: string) {
+export function toLegacyStableBytes32(value: string) {
   return keccak256(toBytes(value));
 }
+
+export function toBytes32String(value: string) {
+  const bytes = toBytes(value);
+  if (bytes.length > 32) {
+    throw new Error(`Cannot encode ${value} as bytes32 string: ${bytes.length} bytes exceeds 32 bytes`);
+  }
+  return padHex(stringToHex(value), { size: 32, dir: 'right' });
+}
+
+export function fromBytes32String(value: string) {
+  if (!isHex(value) || value.length !== 66) return value;
+
+  try {
+    const decoded = hexToString(value, { size: 32 }).replace(/\0+$/g, '');
+    return decoded || value;
+  } catch {
+    return value;
+  }
+}
+
+export const toStableBytes32 = toBytes32String;
 
 export function createPaymentIntent(input: {
   amountUsd: number;
@@ -74,8 +95,23 @@ export function createPaymentIntent(input: {
   };
 
   store.intents.set(intent.id, intent);
-  store.intentBytes32ToId.set(toStableBytes32(intent.id).toLowerCase(), intent.id);
-  store.orderBytes32ToId.set(toStableBytes32(intent.orderId).toLowerCase(), intent.id);
+  store.intentBytes32ToId.set(toBytes32String(intent.id).toLowerCase(), intent.id);
+  store.intentBytes32ToId.set(toLegacyStableBytes32(intent.id).toLowerCase(), intent.id);
+  store.orderBytes32ToId.set(toBytes32String(intent.orderId).toLowerCase(), intent.id);
+  store.orderBytes32ToId.set(toLegacyStableBytes32(intent.orderId).toLowerCase(), intent.id);
+  console.log('[PaymentIntentIdentity] POS stored payment intent', {
+    paymentIntentId: intent.id,
+    paymentRef: intent.id,
+    orderId: intent.orderId,
+    amountUsd: intent.amountUsd,
+    amountMUSD: intent.amountMUSD,
+    status: intent.status,
+    createdAt: intent.createdAt,
+    paymentIntentIdBytes32: toBytes32String(intent.id),
+    orderIdBytes32: toBytes32String(intent.orderId),
+    legacyPaymentIntentHash: toLegacyStableBytes32(intent.id),
+    legacyOrderHash: toLegacyStableBytes32(intent.orderId)
+  });
   return intent;
 }
 
@@ -84,22 +120,45 @@ export function getPaymentIntent(id: string) {
 }
 
 export function findPaymentIntentByOrderId(orderId: string) {
-  const orderKey = orderId.toLowerCase();
+  const canonicalOrderId = fromBytes32String(orderId);
+  const orderKey = canonicalOrderId.toLowerCase();
   const intentId = store.orderBytes32ToId.get(orderKey);
-  if (intentId) return getPaymentIntent(intentId);
+  if (intentId) {
+    const intent = getPaymentIntent(intentId);
+    console.log('[PaymentIntentIdentity] lookup by orderId bytes32 map', { input: orderId, lookupKey: orderKey, found: Boolean(intent), paymentIntentId: intent?.id });
+    return intent;
+  }
 
   for (const intent of store.intents.values()) {
-    if (intent.orderId === orderId) return intent;
+    if (intent.orderId === canonicalOrderId) {
+      console.log('[PaymentIntentIdentity] lookup by canonical orderId', { input: orderId, lookupKey: canonicalOrderId, found: true, paymentIntentId: intent.id });
+      return intent;
+    }
   }
+  console.warn('[PaymentIntentIdentity] order lookup missed', { input: orderId, lookupKey: canonicalOrderId });
   return null;
 }
 
 export function findPaymentIntentByPaymentIntentIdOrBytes32(paymentIntentId: string) {
-  const intent = getPaymentIntent(paymentIntentId);
+  const canonicalPaymentIntentId = fromBytes32String(paymentIntentId);
+  const intent = getPaymentIntent(canonicalPaymentIntentId);
+  console.log('[PaymentIntentIdentity] lookup by paymentIntentId', {
+    input: paymentIntentId,
+    lookupKey: canonicalPaymentIntentId,
+    found: Boolean(intent),
+    paymentIntentId: intent?.id
+  });
   if (intent) return intent;
 
   const intentId = store.intentBytes32ToId.get(paymentIntentId.toLowerCase());
-  return intentId ? getPaymentIntent(intentId) : null;
+  const mappedIntent = intentId ? getPaymentIntent(intentId) : null;
+  console.log('[PaymentIntentIdentity] lookup by paymentIntentId bytes32 map', {
+    input: paymentIntentId,
+    lookupKey: paymentIntentId.toLowerCase(),
+    found: Boolean(mappedIntent),
+    paymentIntentId: mappedIntent?.id
+  });
+  return mappedIntent;
 }
 
 export function hasTxHash(txHash: string) {

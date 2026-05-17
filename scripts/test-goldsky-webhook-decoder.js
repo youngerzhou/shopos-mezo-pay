@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 
 const assert = require('assert');
-const { decodeAbiParameters, decodeEventLog, formatUnits, getAddress, parseAbiItem } = require('viem');
+const { decodeAbiParameters, decodeEventLog, formatUnits, getAddress, hexToString, parseAbiItem, padHex, stringToHex } = require('viem');
 
 const ORDER_PAID_TOPIC0 = '0x09e99da262bb12c46eaeae571a859520dbb1218e8f6e186e4c0392269e98ed36';
+const SAMPLE_PAYMENT_REF = 'PI_8A12E45700DD40FE';
+const SAMPLE_ORDER_ID = 'ORD_1234567890ABCDEF';
+const SAMPLE_PAYMENT_REF_BYTES32 = padHex(stringToHex(SAMPLE_PAYMENT_REF), { size: 32, dir: 'right' });
+const SAMPLE_ORDER_ID_BYTES32 = padHex(stringToHex(SAMPLE_ORDER_ID), { size: 32, dir: 'right' });
 const SAMPLE_TOPICS = [
   ORDER_PAID_TOPIC0,
-  '0x2e67cc59a940477896e778c8c50988160f5f271e02901241be9e36ad8dcdef50',
-  '0x3b1b9c9676e637ad7b9500ef95a5d45943251ebf7049936630a152968f48ffd6',
+  SAMPLE_PAYMENT_REF_BYTES32,
+  SAMPLE_ORDER_ID_BYTES32,
   '0x00000000000000000000000092a3c1adc73f79818a09c6494a7bd28da9ea98e7'
 ];
 const SAMPLE_DATA = '0x00000000000000000000000084edc7907f22e6108c3fed0f4be7633bd26aa134000000000000000000000000118917a40faf1cd7a13db0ef56c86de7973ac503000000000000000000000000000000000000000000000004e1003b28d9280000';
@@ -48,6 +52,10 @@ function topicToAddress(topic) {
   return getAddress(`0x${topic.slice(-40)}`);
 }
 
+function fromBytes32String(value) {
+  return hexToString(value, { size: 32 }).replace(/\0+$/g, '');
+}
+
 function decodeSample(event) {
   const topics = getTopicsFromRawLog(event);
   const data = pick(event, ['data', 'logData', 'log_data']);
@@ -55,8 +63,8 @@ function decodeSample(event) {
   try {
     const decoded = decodeEventLog({ abi: [ORDER_PAID_EVENT], topics, data });
     return {
-      paymentIntentId: decoded.args.paymentIntentId,
-      orderId: decoded.args.orderId,
+      paymentIntentId: fromBytes32String(decoded.args.paymentIntentId),
+      orderId: fromBytes32String(decoded.args.orderId),
       merchant: decoded.args.merchant,
       payer: decoded.args.payer,
       token: decoded.args.token,
@@ -72,8 +80,8 @@ function decodeSample(event) {
       data
     );
     return {
-      paymentIntentId: topics[1],
-      orderId: topics[2],
+      paymentIntentId: fromBytes32String(topics[1]),
+      orderId: fromBytes32String(topics[2]),
       merchant: topicToAddress(topics[3]),
       payer,
       token,
@@ -121,8 +129,8 @@ const sampleRows = [
 
 for (const { name, row } of sampleRows) {
   const decoded = decodeSample(row);
-  assert.strictEqual(decoded.paymentIntentId, SAMPLE_TOPICS[1], `${name}: paymentIntentId`);
-  assert.strictEqual(decoded.orderId, SAMPLE_TOPICS[2], `${name}: orderId`);
+  assert.strictEqual(decoded.paymentIntentId, SAMPLE_PAYMENT_REF, `${name}: paymentIntentId`);
+  assert.strictEqual(decoded.orderId, SAMPLE_ORDER_ID, `${name}: orderId`);
   assert.strictEqual(decoded.merchant, '0x92a3C1AdC73F79818a09C6494a7bd28da9ea98E7', `${name}: merchant`);
   assert.strictEqual(decoded.payer, '0x84eDc7907f22E6108C3fEd0f4be7633BD26AA134', `${name}: payer`);
   assert.strictEqual(decoded.token, '0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503', `${name}: token`);
