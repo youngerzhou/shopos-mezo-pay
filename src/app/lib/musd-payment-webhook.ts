@@ -4,7 +4,6 @@ import {
   findPaymentIntentByOrderId,
   findPaymentIntentByPaymentIntentIdOrBytes32,
   fromBytes32String,
-  getPaymentIntent,
   hasTxHash,
   markPaymentIntentConfirmed
 } from '@/app/lib/payment-intents-store';
@@ -252,9 +251,9 @@ export async function processMusdOrderPaidWebhook(payload: unknown) {
       merchant: event.merchant || ''
     });
     const intent = event.paymentIntentId
-      ? findPaymentIntentByPaymentIntentIdOrBytes32(event.paymentIntentId)
+      ? await findPaymentIntentByPaymentIntentIdOrBytes32(event.paymentIntentId)
       : event.orderId
-        ? findPaymentIntentByOrderId(event.orderId)
+        ? await findPaymentIntentByOrderId(event.orderId)
         : null;
 
     if (!intent) {
@@ -287,7 +286,7 @@ export async function processMusdOrderPaidWebhook(payload: unknown) {
       errors.push(`Missing txHash for ${intent.id}`);
       continue;
     }
-    if (hasTxHash(event.txHash)) {
+    if (await hasTxHash(event.txHash)) {
       errors.push(`Duplicate txHash ${event.txHash}`);
       continue;
     }
@@ -308,7 +307,7 @@ export async function processMusdOrderPaidWebhook(payload: unknown) {
       continue;
     }
 
-    const nextIntent = markPaymentIntentConfirmed(intent, {
+    const nextIntent = await markPaymentIntentConfirmed(intent, {
       txHash: event.txHash,
       payerWallet: event.payerWallet,
       blockNumber: event.blockNumber,

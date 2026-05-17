@@ -154,6 +154,25 @@ export const SCHEMA_DEFINITION = {
     unit_price: "DECIMAL NOT NULL",
     discount_amount: "DECIMAL NOT NULL DEFAULT 0",
     line_total: "DECIMAL NOT NULL"
+  },
+  payment_intents: {
+    id: "TEXT PRIMARY KEY",
+    order_id: "TEXT UNIQUE NOT NULL",
+    amount_usd: "DECIMAL NOT NULL DEFAULT 0",
+    amount_musd: "DECIMAL NOT NULL DEFAULT 0",
+    token: "TEXT NOT NULL DEFAULT 'MUSD'",
+    network: "TEXT NOT NULL DEFAULT 'mezo-testnet'",
+    merchant_wallet: "TEXT NOT NULL",
+    status: "TEXT NOT NULL DEFAULT 'pending'",
+    payment_flow: "TEXT NOT NULL DEFAULT 'musd_scan_to_pay'",
+    payer_wallet: "TEXT",
+    tx_hash: "TEXT",
+    block_number: "INTEGER",
+    raw_event: "JSONB",
+    expires_at: "TIMESTAMP NOT NULL",
+    confirmed_at: "TIMESTAMP",
+    created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    updated_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
   }
 };
 

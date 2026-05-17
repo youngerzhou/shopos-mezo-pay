@@ -26,6 +26,26 @@ interface PaymentIntentResponse {
   payerWallet?: string;
   txHash?: string;
   blockNumber?: number;
+  lookupKey?: string;
+  lookupKeyType?: string;
+  orderExists?: boolean;
+  paymentIntentExists?: boolean;
+  storageBackend?: string;
+  possibleReason?: string;
+}
+
+function formatPaymentIntentError(data: any, fallback: string) {
+  if (!data || typeof data !== 'object') return fallback;
+  const details = [
+    data.error || fallback,
+    data.lookupKey ? `lookupKey=${data.lookupKey}` : '',
+    data.lookupKeyType ? `lookupKeyType=${data.lookupKeyType}` : '',
+    data.orderExists !== undefined ? `orderExists=${data.orderExists ? 'yes' : 'no'}` : '',
+    data.paymentIntentExists !== undefined ? `paymentIntentExists=${data.paymentIntentExists ? 'yes' : 'no'}` : '',
+    data.storageBackend ? `storage=${data.storageBackend}` : '',
+    data.possibleReason ? `reason=${data.possibleReason}` : ''
+  ].filter(Boolean);
+  return details.join(' | ');
 }
 
 interface MusdQrPaymentSheetProps {
@@ -65,6 +85,7 @@ export function MusdQrPaymentSheet({
   const qrPayload = intent?.qrPayload || '';
   const statusLabel = STATUS_LABELS[status] || 'Waiting for payment...';
   const shortenedPaymentLink = qrPayload ? qrPayload.replace('https://shopos-mezo-pay.vercel.app', 'shopos-mezo-pay.vercel.app') : '';
+  const displayedPaymentRef = intent?.paymentIntentId || 'Creating...';
 
   const createPaymentIntent = useCallback(async () => {
     setLoading(true);
@@ -88,6 +109,17 @@ export function MusdQrPaymentSheet({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Unable to create payment intent');
 
+      console.log('[PaymentIntentIdentity] POS created payment intent', {
+        paymentIntentId: data.paymentIntentId,
+        paymentRef: data.paymentRef || data.paymentIntentId,
+        orderId: data.orderId,
+        status: data.status,
+        storageBackend: data.storageBackend,
+        paymentIntentIdBytes32: data.paymentIntentIdBytes32,
+        orderIdBytes32: data.orderIdBytes32,
+        qrPayload: data.qrPayload,
+        storedPaymentIntent: data
+      });
       setIntent(data);
       setStatus(data.status);
     } catch (err: any) {
@@ -107,13 +139,33 @@ export function MusdQrPaymentSheet({
 
     const interval = window.setInterval(async () => {
       try {
+        console.log('[PaymentIntentIdentity] POS polling payment intent', {
+          lookupKey: intent.paymentIntentId,
+          lookupKeyType: 'paymentIntentId',
+          paymentRef: intent.paymentIntentId,
+          orderId: intent.orderId
+        });
         const res = await fetch(`/api/pos/payment-intents/${encodeURIComponent(intent.paymentIntentId)}`, { cache: 'no-store' });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Unable to fetch payment status');
+        if (!res.ok) throw new Error(formatPaymentIntentError(data, 'Unable to fetch payment status'));
 
+        console.log('[PaymentIntentIdentity] POS polling lookup result', {
+          lookupKey: intent.paymentIntentId,
+          found: true,
+          status: data.status,
+          storageBackend: data.storageBackend,
+          orderExists: data.orderExists,
+          paymentIntentExists: data.paymentIntentExists,
+          paymentIntent: data
+        });
         setIntent((current) => ({ ...(current || intent), ...data }));
         setStatus(data.status);
       } catch (err: any) {
+        console.warn('[PaymentIntentIdentity] POS polling lookup failed', {
+          lookupKey: intent.paymentIntentId,
+          lookupKeyType: 'paymentIntentId',
+          error: err.message || 'Unable to fetch payment status'
+        });
         setError(err.message || 'Unable to fetch payment status');
       }
     }, 2000);
@@ -128,28 +180,69 @@ export function MusdQrPaymentSheet({
   }, [hasSubmittedConfirmation, intent, onConfirmed, status]);
 
   const markDemoPaid = async () => {
-    if (!intent) return;
+    if (!intent) {
+      const message = `Cannot mark as paid because the payment intent was not found. lookupKey=${displayedPaymentRef}`;
+      console.warn('[PaymentIntentIdentity] Mark as paid blocked: missing payment intent', {
+        displayedPaymentRef,
+        paymentIntent: intent,
+        paymentIntentId: intent?.paymentIntentId,
+        orderId: intent?.orderId
+      });
+      setError(message);
+      return;
+    }
     setLoading(true);
     setError('');
 
     try {
       const mockTxHash = `0x${Date.now().toString(16).padStart(64, '0')}`;
+      const markAsPaidPayload = {
+        paymentIntentId: intent.paymentIntentId,
+        orderId: intent.orderId,
+        txHash: mockTxHash,
+        payerWallet: member?.walletAddress || '0x84edc7907f22e6108c3fed0f4be7633bd26aa134',
+        merchant: intent.merchantWallet,
+        token: 'MUSD',
+        amountMUSD: intent.amountMUSD,
+        blockNumber: Math.floor(Date.now() / 1000)
+      };
+      console.log('[PaymentIntentIdentity] Mark as paid clicked', {
+        displayedPaymentRef,
+        paymentIntent: intent,
+        paymentIntentId: intent.paymentIntentId,
+        paymentIntentObjectId: (intent as any).id,
+        orderId: intent.orderId,
+        status,
+        markAsPaidPayload
+      });
       const res = await fetch('/api/webhooks/goldsky/musd-payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paymentIntentId: intent.paymentIntentId,
-          orderId: intent.orderId,
-          txHash: mockTxHash,
-          payerWallet: member?.walletAddress || '0x84edc7907f22e6108c3fed0f4be7633bd26aa134',
-          merchant: intent.merchantWallet,
-          token: 'MUSD',
-          amountMUSD: intent.amountMUSD,
-          blockNumber: Math.floor(Date.now() / 1000)
-        })
+        body: JSON.stringify(markAsPaidPayload)
       });
       const data = await res.json();
+      console.log('[PaymentIntentIdentity] Mark as paid result', {
+        displayedPaymentRef,
+        paymentIntentId: intent.paymentIntentId,
+        orderId: intent.orderId,
+        ok: res.ok,
+        status: res.status,
+        result: data
+      });
       if (!res.ok) throw new Error(data.error || 'Unable to confirm demo payment');
+      if (!data.paymentIntent) {
+        throw new Error(formatPaymentIntentError({
+          error: 'Cannot mark as paid because the payment intent was not found.',
+          lookupKey: intent.paymentIntentId,
+          lookupKeyType: 'paymentIntentId',
+          orderExists: false,
+          paymentIntentExists: false,
+          storageBackend: intent.storageBackend || 'database:payment_intents',
+          possibleReason: Array.isArray(data.errors) && data.errors.length > 0
+            ? data.errors.join('; ')
+            : 'The mark-as-paid webhook did not return a matched payment intent.'
+        }, 'Cannot mark as paid because the payment intent was not found.'));
+      }
 
       const confirmedIntent = {
         ...intent,
@@ -186,7 +279,7 @@ export function MusdQrPaymentSheet({
           <InfoRow label="Pay" value={formatMUSD(amountDue)} />
           <InfoRow label="Network" value="Mezo Testnet" />
           <InfoRow label="Merchant" value="SHOPOS" />
-          <InfoRow label="Payment Ref" value={intent?.paymentIntentId || 'Creating...'} />
+          <InfoRow label="Payment Ref" value={displayedPaymentRef} />
           <InfoRow label="Status" value={loading && !intent ? 'Creating payment intent...' : statusLabel} />
         </div>
 

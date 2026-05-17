@@ -186,6 +186,15 @@ export async function initDb() {
       CREATE UNIQUE INDEX IF NOT EXISTS user_coupons_wallet_source_ref_idx
       ON user_coupons (LOWER(customer_wallet), source, source_ref)
     `);
+    await sql(`
+      CREATE INDEX IF NOT EXISTS payment_intents_order_id_idx
+      ON payment_intents (order_id)
+    `);
+    await sql(`
+      CREATE UNIQUE INDEX IF NOT EXISTS payment_intents_tx_hash_unique_idx
+      ON payment_intents (LOWER(tx_hash))
+      WHERE tx_hash IS NOT NULL
+    `);
 
     // Seed a demo staff member if none exists
     const demoStaff = await sql`SELECT 1 FROM staff WHERE staff_id = 'STAFF001'`;

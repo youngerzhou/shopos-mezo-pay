@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
       process.env.NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET?.trim() ||
       await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7')
     );
-    const intent = createPaymentIntent({ amountUsd, amountMUSD, merchantWallet });
+    const intent = await createPaymentIntent({ amountUsd, amountMUSD, merchantWallet });
     const paymentIntentIdBytes32 = toStableBytes32(intent.id);
     const orderIdBytes32 = toStableBytes32(intent.orderId);
     const qrParams = new URLSearchParams({
@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
     });
     const qrPayload = `https://shopos-mezo-pay.vercel.app/customer-pay?${qrParams.toString()}`;
     console.log('[PaymentIntentIdentity] QR URL generated', {
+      storageBackend: 'database:payment_intents',
       paymentIntentId: intent.id,
       paymentRef: intent.id,
       orderId: intent.orderId,
@@ -65,6 +66,7 @@ export async function POST(req: NextRequest) {
       network: intent.network,
       merchantWallet: intent.merchantWallet,
       status: intent.status,
+      storageBackend: 'database:payment_intents',
       qrPayload,
       expiresAt: intent.expiresAt,
       paymentIntentIdBytes32,
