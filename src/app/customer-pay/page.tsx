@@ -11,6 +11,7 @@ import {
   useWaitForTransactionReceipt,
   useWriteContract
 } from 'wagmi';
+import { useModal } from 'connectkit';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { mezoTestnet } from '@/app/lib/mezo-config';
@@ -78,9 +79,10 @@ function CustomerPayContent() {
   const params = useSearchParams();
   const publicClient = usePublicClient();
   const { address, isConnected, chainId } = useAccount();
-  const { connect, connectors, isPending: isConnecting } = useConnect();
+  const { isPending: isConnecting } = useConnect();
   const { switchChain } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
+  const { setOpen: setConnectModalOpen } = useModal();
 
   const [decimals, setDecimals] = useState(18);
   const [allowance, setAllowance] = useState(0);
@@ -183,8 +185,8 @@ function CustomerPayContent() {
   }, [isConfirmed, loadTokenState, step]);
 
   const connectWallet = () => {
-    const injected = connectors.find((connector) => connector.id === 'injected') || connectors[0];
-    if (injected) connect({ connector: injected });
+    // Use ConnectKit modal to show wallet selector (same as register page)
+    setConnectModalOpen(true);
   };
 
   const switchToMezo = async () => {
@@ -268,9 +270,9 @@ function CustomerPayContent() {
       ? 'Switch to Mezo Testnet'
       : !hasEnoughBalance
         ? 'Insufficient MUSD balance'
-      : !hasEnoughAllowance
-        ? 'Approve MUSD'
-        : 'Pay MUSD';
+        : !hasEnoughAllowance
+          ? 'Approve MUSD'
+          : 'Pay MUSD';
 
   const disablePrimary = isConnecting ||
     loadingBalances ||
