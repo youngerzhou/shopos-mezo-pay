@@ -26,8 +26,8 @@ export const mezoTestnet = defineChain({
   id: 31611,
   name: 'Mezo Testnet',
   nativeCurrency: {
-    name: 'Ether',
-    symbol: 'ETH',
+    name: 'Bitcoin',
+    symbol: 'BTC',
     decimals: 18,
   },
   rpcUrls: {

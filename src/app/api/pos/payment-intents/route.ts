@@ -42,7 +42,11 @@ export async function POST(req: NextRequest) {
       amount: intent.amountMUSD.toFixed(2),
       network: 'mezo-testnet'
     });
-    const qrPayload = `https://shopos-mezo-pay.vercel.app/customer-pay?${qrParams.toString()}`;
+    const baseUrl =
+      req.nextUrl.origin ||
+      process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+      'https://shopos-mezo-pay.vercel.app';
+    const qrPayload = `${baseUrl}/customer/pay/${encodeURIComponent(intent.id)}?${qrParams.toString()}`;
     console.log('[PaymentIntentIdentity] QR URL generated', {
       storageBackend: 'database:payment_intents',
       paymentIntentId: intent.id,

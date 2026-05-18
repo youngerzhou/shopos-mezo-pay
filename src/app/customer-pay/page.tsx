@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, RefreshCw, Wallet } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Copy, ExternalLink, RefreshCw, Wallet } from 'lucide-react';
 import { parseUnits, formatUnits } from 'viem';
 import {
   useAccount,
@@ -77,6 +77,18 @@ const shoposPaymentAbi = [
 ] as const;
 
 type Step = 'idle' | 'approving' | 'paying' | 'submitted' | 'confirmed';
+
+type PaymentIntentDetails = {
+  id: string;
+  orderId: string;
+  amountMUSD: number;
+  token: 'MUSD';
+  network: 'mezo-testnet';
+  merchantWallet: string;
+  status: 'pending' | 'detected' | 'confirmed' | 'expired' | 'failed';
+  paymentIntentIdBytes32: string;
+  orderIdBytes32: string;
+};
 
 type TokenDiagnostics = {
   envMusdTokenAddress: string;
@@ -186,7 +198,7 @@ function metricValue(value: number | null, invalid: boolean) {
   return value != null ? formatMUSD(value) : '-';
 }
 
-function CustomerPayContent() {
+export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIntentIdFromPath?: string }) {
   const params = useSearchParams();
   const publicClient = usePublicClient();
   const { address, isConnected, chainId, connector } = useAccount();
@@ -208,19 +220,23 @@ function CustomerPayContent() {
   const [needsApproval, setNeedsApproval] = useState(false);
   const [tokenDiagnostics, setTokenDiagnostics] = useState<TokenDiagnostics>(emptyDiagnostics);
   const [lastWriteError, setLastWriteError] = useState('');
+  const [paymentIntentDetails, setPaymentIntentDetails] = useState<PaymentIntentDetails | null>(null);
+  const [intentLoading, setIntentLoading] = useState(Boolean(paymentIntentIdFromPath));
+  const [intentError, setIntentError] = useState('');
+  const [copiedPaymentLink, setCopiedPaymentLink] = useState(false);
   const [walletDebug, setWalletDebug] = useState({
     isMobile: 'unknown',
     hasWindowEthereum: 'unknown',
     walletConnectProjectIdPresent: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() ? 'yes' : 'no'
   });
 
-  const paymentIntentId = params.get('paymentIntentId') || '';
-  const orderId = params.get('orderId') || '';
-  const paymentIntentIdBytes32 = params.get('paymentIntentIdBytes32') || '';
-  const orderIdBytes32 = params.get('orderIdBytes32') || '';
-  const merchant = params.get('merchant') || process.env.NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET || '';
-  const amount = Number(params.get('amount') || 0);
-  const network = params.get('network') || 'mezo-testnet';
+  const paymentIntentId = paymentIntentDetails?.id || params.get('paymentIntentId') || paymentIntentIdFromPath || '';
+  const orderId = paymentIntentDetails?.orderId || params.get('orderId') || '';
+  const paymentIntentIdBytes32 = paymentIntentDetails?.paymentIntentIdBytes32 || params.get('paymentIntentIdBytes32') || '';
+  const orderIdBytes32 = paymentIntentDetails?.orderIdBytes32 || params.get('orderIdBytes32') || '';
+  const merchant = paymentIntentDetails?.merchantWallet || params.get('merchant') || process.env.NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET || '';
+  const amount = paymentIntentDetails?.amountMUSD || Number(params.get('amount') || 0);
+  const network = paymentIntentDetails?.network || params.get('network') || 'mezo-testnet';
 
   // QR Payment Mode 2: Customer-initiated contract payment
   // Customer signs transaction to ShopOSPayment contract which emits OrderPaid event
@@ -240,9 +256,12 @@ function CustomerPayContent() {
     return connectors.map((item) => `${item.name} (${item.id})`).join(', ');
   }, [connectors]);
   const writeConnectorReady = Boolean(isConnected && address && connector && typeof writeContractAsync === 'function');
+  const isMobileBrowserWithoutProvider = walletDebug.isMobile === 'yes' && walletDebug.hasWindowEthereum === 'no';
   const metaMaskDeepLink = useMemo(() => {
     if (typeof window === 'undefined') return '';
-    return `https://metamask.app.link/dapp/${window.location.href.replace(/^https?:\/\//, '')}`;
+    const currentUrl = window.location.href;
+    const encoded = encodeURIComponent(currentUrl.replace(/^https?:\/\//, ''));
+    return `https://link.metamask.io/dapp/${encoded}`;
   }, []);
 
   useEffect(() => {
@@ -269,6 +288,44 @@ function CustomerPayContent() {
       lastWriteError: lastWriteError || '-'
     });
   }, [connectError?.message, connector, connectors, lastWriteError, writeConnectorReady]);
+
+  useEffect(() => {
+    if (!paymentIntentIdFromPath) return;
+    let cancelled = false;
+
+    async function loadPaymentIntent() {
+      setIntentLoading(true);
+      setIntentError('');
+      try {
+        const res = await fetch(`/api/pos/payment-intents/${encodeURIComponent(paymentIntentIdFromPath)}`, { cache: 'no-store' });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.error === 'Payment intent not found' ? 'Payment intent not found.' : data?.error || 'Payment intent not found.');
+        }
+        if (cancelled) return;
+        setPaymentIntentDetails({
+          id: data.id || data.paymentIntentId || paymentIntentIdFromPath,
+          orderId: data.orderId,
+          amountMUSD: Number(data.amountMUSD || 0),
+          token: data.token || 'MUSD',
+          network: data.network || 'mezo-testnet',
+          merchantWallet: data.merchantWallet,
+          status: data.status,
+          paymentIntentIdBytes32: data.paymentIntentIdBytes32,
+          orderIdBytes32: data.orderIdBytes32
+        });
+      } catch (err: any) {
+        if (!cancelled) setIntentError(err.message || 'Payment intent not found.');
+      } finally {
+        if (!cancelled) setIntentLoading(false);
+      }
+    }
+
+    loadPaymentIntent();
+    return () => {
+      cancelled = true;
+    };
+  }, [paymentIntentIdFromPath]);
 
   const amountInUnits = useMemo(() => {
     try {
@@ -585,6 +642,32 @@ function CustomerPayContent() {
   }, [isPaymentConfirmed, step]);
 
   useEffect(() => {
+    if (!isPaymentConfirmed || !paymentTxHash || !paymentIntentId) return;
+    let cancelled = false;
+
+    async function submitPaymentTx() {
+      try {
+        const res = await fetch(`/api/payment-intents/${encodeURIComponent(paymentIntentId)}/submit-tx`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ txHash: paymentTxHash })
+        });
+        const data = await res.json();
+        if (!res.ok && !cancelled) {
+          setError(data?.error || 'Payment failed');
+        }
+      } catch (err: any) {
+        if (!cancelled) setError(err.message || 'Payment failed');
+      }
+    }
+
+    submitPaymentTx();
+    return () => {
+      cancelled = true;
+    };
+  }, [isPaymentConfirmed, paymentIntentId, paymentTxHash]);
+
+  useEffect(() => {
     if (isApprovalConfirmed) {
       loadTokenState();
     }
@@ -626,7 +709,7 @@ function CustomerPayContent() {
     try {
       await switchChain({ chainId: mezoTestnet.id });
     } catch (err: any) {
-      setError(err.message || 'Please switch to Mezo Testnet.');
+      setError(err.message || 'Please switch to Mezo.');
     }
   };
 
@@ -638,6 +721,17 @@ function CustomerPayContent() {
       currentUrl: typeof window !== 'undefined' ? window.location.href : '-'
     });
     if (metaMaskDeepLink) window.location.href = metaMaskDeepLink;
+  };
+
+  const copyPaymentLink = async () => {
+    if (typeof window === 'undefined') return;
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopiedPaymentLink(true);
+      window.setTimeout(() => setCopiedPaymentLink(false), 1500);
+    } catch {
+      setError('Unable to copy payment link.');
+    }
   };
 
   const requireWriteConnector = () => {
@@ -700,7 +794,7 @@ function CustomerPayContent() {
       });
     } catch (err: any) {
       setStep('idle');
-      const message = err.message?.toLowerCase().includes('rejected') ? 'Transaction cancelled.' : err.message || 'Approve transaction failed.';
+      const message = err.message?.toLowerCase().includes('rejected') ? 'Payment cancelled by user' : err.message || 'Payment failed';
       setLastWriteError(message);
       setError(message);
     }
@@ -761,7 +855,7 @@ function CustomerPayContent() {
       });
     } catch (err: any) {
       setStep('idle');
-      const message = err.message?.toLowerCase().includes('rejected') ? 'Transaction cancelled.' : err.message || 'Payment transaction failed.';
+      const message = err.message?.toLowerCase().includes('rejected') ? 'Payment cancelled by user' : err.message || 'Payment failed';
       setLastWriteError(message);
       setError(message);
     }
@@ -801,6 +895,7 @@ function CustomerPayContent() {
     isPaymentConfirming ||
     step === 'submitted' ||
     step === 'confirmed' ||
+    intentLoading ||
     !hasRequiredParams ||
     (writeConnectorReady && !isWrongNetwork && (tokenConfigInvalid || !!tokenAddressConfigError || hasDiagnosticsError || !hasEnoughBalance));
 
@@ -820,12 +915,41 @@ function CustomerPayContent() {
         </div>
 
         <div className="rounded-3xl bg-white p-5 shadow-sm">
-          {missingEnv.length > 0 ? (
+          {intentLoading ? (
+            <StatusBox tone="warn" text="Loading payment intent..." />
+          ) : intentError ? (
+            <StatusBox tone="error" text="Payment intent not found." />
+          ) : missingEnv.length > 0 ? (
             <StatusBox tone="error" text={`Missing environment configuration: ${missingEnv.join(', ')}.`} />
           ) : !hasRequiredParams ? (
             <StatusBox tone="error" text="Invalid payment link. Missing payment intent details." />
           ) : (
             <>
+              {isMobileBrowserWithoutProvider && !writeConnectorReady ? (
+                <div className="mb-4 rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                  <p className="text-sm font-black text-orange-900">Mobile Wallet Options</p>
+                  <p className="mt-2 text-sm font-bold text-orange-800">
+                    This browser cannot sign blockchain transactions directly. Please open this payment page in a wallet app.
+                  </p>
+                  <Button className="mt-4 h-11 w-full rounded-xl bg-orange-600 text-sm font-black text-white hover:bg-red-950" onClick={openInMetaMask} type="button">
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Open in MetaMask
+                  </Button>
+                  <ConnectKitButton.Custom>
+                    {({ show }) => (
+                      <Button className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white text-sm font-black text-slate-800 hover:bg-slate-50" onClick={() => connectWallet(show)} type="button">
+                        <Wallet className="mr-2 h-4 w-4" />
+                        Connect with WalletConnect
+                      </Button>
+                    )}
+                  </ConnectKitButton.Custom>
+                  <Button className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white text-sm font-black text-slate-800 hover:bg-slate-50" onClick={copyPaymentLink} type="button">
+                    <Copy className="mr-2 h-4 w-4" />
+                    {copiedPaymentLink ? 'Copied' : 'Copy payment link'}
+                  </Button>
+                </div>
+              ) : null}
+
               {isConnected ? (
                 <div className="mb-4 rounded-2xl bg-slate-50 p-3 text-sm font-bold">
                   <p className="text-slate-500">Customer wallet</p>
@@ -843,7 +967,7 @@ function CustomerPayContent() {
                 </div>
               ) : null}
 
-              {isWrongNetwork ? <StatusBox tone="warn" text="Please switch to Mezo Testnet." /> : null}
+              {isWrongNetwork ? <StatusBox tone="warn" text="Please switch to Mezo." /> : null}
               {legacyMUSDSetupWarning ? <StatusBox tone="warn" text={legacyMUSDSetupWarning} /> : null}
               {!isWrongNetwork && isConnected && (tokenConfigInvalid || tokenAddressConfigError || hasDiagnosticsError) ? (
                 <StatusBox tone="error" text={tokenDiagnostics.exactErrorMessage || tokenAddressConfigError || 'Token diagnostics failed.'} />
@@ -858,7 +982,7 @@ function CustomerPayContent() {
                 </div>
               )}
 
-              {!writeConnectorReady ? (
+              {!writeConnectorReady && !isMobileBrowserWithoutProvider ? (
                 <ConnectKitButton.Custom>
                   {({ show }) => (
                     <Button
@@ -871,7 +995,7 @@ function CustomerPayContent() {
                     </Button>
                   )}
                 </ConnectKitButton.Custom>
-              ) : (
+              ) : writeConnectorReady ? (
                 <Button
                   className="mt-4 h-12 w-full rounded-xl bg-orange-600 text-base font-black text-white hover:bg-red-950"
                   disabled={disablePrimary}
@@ -884,15 +1008,9 @@ function CustomerPayContent() {
                   )}
                   {primaryLabel}
                 </Button>
-              )}
+              ) : null}
               {walletDebug.isMobile === 'yes' && !writeConnectorReady ? (
-                <Button
-                  className="mt-3 h-11 w-full rounded-xl border border-orange-200 bg-white text-sm font-black text-orange-700 hover:bg-orange-50"
-                  onClick={openInMetaMask}
-                  type="button"
-                >
-                  Open in MetaMask
-                </Button>
+                <StatusBox tone="warn" text="Please open this payment page in MetaMask, OKX Wallet, Trust Wallet, or connect with WalletConnect." />
               ) : null}
               <Button
                 className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white text-sm font-black text-slate-800 hover:bg-slate-50"
@@ -920,7 +1038,7 @@ function CustomerPayContent() {
           <div className="rounded-3xl bg-white p-5 shadow-sm">
             <p className="text-sm font-black text-slate-950">Payment Transaction</p>
             <p className="mt-2 break-all rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-600">{paymentTxHash}</p>
-            {step === 'submitted' || isPaymentConfirming ? <StatusBox tone="warn" text="Waiting for blockchain confirmation..." /> : null}
+            {step === 'submitted' || isPaymentConfirming ? <StatusBox tone="warn" text="Waiting for blockchain confirmation" /> : null}
             {step === 'confirmed' ? <StatusBox tone="success" text="Payment Submitted" /> : null}
             {step === 'submitted' || step === 'confirmed' || isPaymentConfirming ? (
               <p className="mt-3 text-xs font-bold text-slate-500">
