@@ -224,6 +224,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   const [intentLoading, setIntentLoading] = useState(Boolean(paymentIntentIdFromPath));
   const [intentError, setIntentError] = useState('');
   const [copiedPaymentLink, setCopiedPaymentLink] = useState(false);
+  const [paymentPageUrl, setPaymentPageUrl] = useState('');
   const [walletDebug, setWalletDebug] = useState({
     isMobile: 'unknown',
     hasWindowEthereum: 'unknown',
@@ -257,12 +258,6 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   }, [connectors]);
   const writeConnectorReady = Boolean(isConnected && address && connector && typeof writeContractAsync === 'function');
   const isMobileBrowserWithoutProvider = walletDebug.isMobile === 'yes' && walletDebug.hasWindowEthereum === 'no';
-  const metaMaskDeepLink = useMemo(() => {
-    if (typeof window === 'undefined') return '';
-    const currentUrl = window.location.href;
-    const encoded = encodeURIComponent(currentUrl.replace(/^https?:\/\//, ''));
-    return `https://link.metamask.io/dapp/${encoded}`;
-  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -288,6 +283,11 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
       lastWriteError: lastWriteError || '-'
     });
   }, [connectError?.message, connector, connectors, lastWriteError, writeConnectorReady]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setPaymentPageUrl(window.location.href);
+  }, [paymentIntentId]);
 
   useEffect(() => {
     if (!paymentIntentIdFromPath) return;
@@ -714,13 +714,26 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   };
 
   const openInMetaMask = () => {
+    const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
+    if (!currentUrl || !currentUrl.startsWith('http')) {
+      setError('Invalid payment page URL');
+      throw new Error('Invalid payment page URL');
+    }
+    if (!paymentIntentId || !currentUrl.includes(paymentIntentId)) {
+      setError('Invalid payment page URL');
+      throw new Error('Invalid payment page URL');
+    }
+    const metamaskDeepLink = `https://link.metamask.io/dapp/${currentUrl.replace(/^https?:\/\//, '')}`;
+    console.log('[MetaMask Deeplink] currentUrl:', currentUrl);
+    console.log('[MetaMask Deeplink] paymentIntentId:', paymentIntentId);
+    console.log('[MetaMask Deeplink] deepLink:', metamaskDeepLink);
     console.log('[WalletConnectDebug] open in MetaMask clicked', {
       isMobile: walletDebug.isMobile,
       hasWindowEthereum: walletDebug.hasWindowEthereum,
-      deeplink: metaMaskDeepLink,
-      currentUrl: typeof window !== 'undefined' ? window.location.href : '-'
+      deeplink: metamaskDeepLink,
+      currentUrl
     });
-    if (metaMaskDeepLink) window.location.href = metaMaskDeepLink;
+    window.location.href = metamaskDeepLink;
   };
 
   const copyPaymentLink = async () => {
@@ -935,6 +948,11 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
                     <ExternalLink className="mr-2 h-4 w-4" />
                     Open in MetaMask
                   </Button>
+                  {paymentPageUrl ? (
+                    <p className="mt-3 break-all rounded-xl bg-white p-3 text-xs font-bold text-slate-600">
+                      {paymentPageUrl}
+                    </p>
+                  ) : null}
                   <ConnectKitButton.Custom>
                     {({ show }) => (
                       <Button className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white text-sm font-black text-slate-800 hover:bg-slate-50" onClick={() => connectWallet(show)} type="button">
