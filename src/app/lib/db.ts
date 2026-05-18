@@ -1181,3 +1181,371 @@ export async function updateTransactionByRecipient(recipient: string, amount: nu
 export async function updateOrderByWallet(walletAddress: string, status: string, hash?: string) {
   return updateTransactionByRecipient(walletAddress, 0, hash || '');
 }
+
+export type ReconciliationPaymentMethod =
+  | 'cash'
+  | 'card'
+  | 'stored_value'
+  | 'musd_wallet'
+  | 'musd_fast_pay'
+  | 'other_wallet'
+  | 'other';
+
+export interface ReconciliationReport {
+  storeName: string;
+  from: string;
+  to: string;
+  paymentSummary: {
+    key: ReconciliationPaymentMethod;
+    paymentMethod: string;
+    orderCount: number;
+    amount: number;
+    blockchain: boolean;
+  }[];
+  blockchainSummary: {
+    totalBlockchainPayments: number;
+    musdWalletPaymentTotal: number;
+    musdFastPayTotal: number;
+    blockchainSettlementTotal: number;
+    onChainConfirmedOrders: number;
+    pendingBlockchainConfirmation: number;
+    failedExpiredBlockchainPayments: number;
+  };
+  orderStatusSummary: {
+    paidOrders: number;
+    pendingOrders: number;
+    cancelledOrders: number;
+    refundedOrders: number;
+  };
+  membershipSummary: {
+    memberOrders: number;
+    nonMemberOrders: number;
+    couponsUsed: number;
+    couponDiscountTotal: number;
+    fastPayRewardCouponsIssued: number;
+    newMembersRegisteredToday: number;
+  };
+  totals: {
+    totalOrders: number;
+    grossSalesAmount: number;
+    discountAmount: number;
+    refundAmount: number;
+    netPaidAmount: number;
+    blockchainPaymentTotal: number;
+    musdPaymentCount: number;
+  };
+  blockchainTransactions: {
+    orderId: string;
+    orderNo: string;
+    paymentIntentId: string;
+    txHash: string;
+    walletAddress: string;
+    blockNumber: number | null;
+    amount: number;
+    status: string;
+    paymentFlow: string;
+    createdAt: string;
+    explorerUrl: string | null;
+  }[];
+  printedAt: string;
+}
+
+function toIsoString(value: any) {
+  if (!value) return '';
+  if (value instanceof Date) return value.toISOString();
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+}
+
+function paymentMethodLabel(key: ReconciliationPaymentMethod) {
+  const labels: Record<ReconciliationPaymentMethod, string> = {
+    cash: 'Cash',
+    card: 'Card',
+    stored_value: 'Stored Value',
+    musd_wallet: 'MUSD Wallet Payment',
+    musd_fast_pay: 'MUSD Fast Pay',
+    other_wallet: 'Other Wallet',
+    other: 'Other'
+  };
+  return labels[key];
+}
+
+function normalizeReconciliationPaymentKey(value: string): ReconciliationPaymentMethod {
+  const normalized = value.toLowerCase().trim();
+  if (normalized === 'cash') return 'cash';
+  if (normalized === 'card') return 'card';
+  if (normalized === 'stored_value' || normalized === 'member_balance') return 'stored_value';
+  if (normalized === 'musd' || normalized === 'wallet' || normalized === 'musd_wallet') return 'musd_wallet';
+  if (normalized === 'fast_pay' || normalized === 'pull_payment' || normalized === 'musd_fast_pay') return 'musd_fast_pay';
+  if (normalized === 'other_wallet') return 'other_wallet';
+  return 'other';
+}
+
+export async function getDailyReconciliationReport(from: string, to: string): Promise<ReconciliationReport> {
+  await ensureDb();
+  const sql = getSql();
+
+  const fromDate = new Date(from);
+  const toDate = new Date(to);
+  if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+    throw new Error('Invalid reconciliation date range');
+  }
+
+  const fromIso = fromDate.toISOString();
+  const toIso = toDate.toISOString();
+
+  const [
+    paymentRows,
+    statusRows,
+    totalsRows,
+    membershipRows,
+    couponIssueRows,
+    customerRows,
+    blockchainRows,
+    transactionRows
+  ] = await Promise.all([
+    sql`
+      WITH scoped_orders AS (
+        SELECT *
+        FROM pos_orders
+        WHERE created_at >= ${fromIso}::timestamp
+        AND created_at <= ${toIso}::timestamp
+      ),
+      classified_orders AS (
+        SELECT
+          CASE
+            WHEN so.payment_status = 'paid'
+              AND tx.transaction_hash IS NOT NULL
+              AND tx.status = 'success'
+              THEN 'musd_fast_pay'
+            WHEN so.payment_status = 'paid'
+              AND pi.tx_hash IS NOT NULL
+              THEN 'musd_wallet'
+            WHEN so.payment_status = 'paid'
+              AND so.payment_tx_hash IS NOT NULL
+              THEN 'other_wallet'
+            ELSE 'other'
+          END AS method_key,
+          COUNT(*)::int AS order_count,
+          COALESCE(SUM(so.total_amount), 0)::float AS amount
+        FROM scoped_orders so
+        LEFT JOIN payment_intents pi
+          ON so.payment_tx_hash IS NOT NULL
+          AND pi.tx_hash IS NOT NULL
+          AND LOWER(so.payment_tx_hash) = LOWER(pi.tx_hash)
+        LEFT JOIN transactions tx
+          ON so.payment_tx_hash IS NOT NULL
+          AND tx.transaction_hash IS NOT NULL
+          AND LOWER(so.payment_tx_hash) = LOWER(tx.transaction_hash)
+        GROUP BY method_key
+      )
+      SELECT method_key, order_count, amount
+      FROM classified_orders
+    `,
+    sql`
+      SELECT
+        COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN 1 ELSE 0 END), 0)::int AS paid_orders,
+        COALESCE(SUM(CASE WHEN payment_status = 'pending' THEN 1 ELSE 0 END), 0)::int AS pending_orders,
+        COALESCE(SUM(CASE WHEN payment_status = 'cancelled' THEN 1 ELSE 0 END), 0)::int AS cancelled_orders,
+        COALESCE(SUM(CASE WHEN payment_status = 'refunded' THEN 1 ELSE 0 END), 0)::int AS refunded_orders
+      FROM pos_orders
+      WHERE created_at >= ${fromIso}::timestamp
+      AND created_at <= ${toIso}::timestamp
+    `,
+    sql`
+      SELECT
+        COUNT(*)::int AS total_orders,
+        COALESCE(SUM(subtotal), 0)::float AS gross_sales_amount,
+        COALESCE(SUM(discount_amount + coupon_discount_amount), 0)::float AS discount_amount,
+        COALESCE(SUM(CASE WHEN payment_status = 'refunded' THEN total_amount ELSE 0 END), 0)::float AS refund_amount,
+        COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END), 0)::float AS net_paid_amount
+      FROM pos_orders
+      WHERE created_at >= ${fromIso}::timestamp
+      AND created_at <= ${toIso}::timestamp
+    `,
+    sql`
+      SELECT
+        COALESCE(SUM(CASE WHEN customer_referral_id IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS member_orders,
+        COALESCE(SUM(CASE WHEN customer_referral_id IS NULL THEN 1 ELSE 0 END), 0)::int AS non_member_orders,
+        COALESCE(SUM(CASE WHEN coupon_id IS NOT NULL AND payment_status = 'paid' THEN 1 ELSE 0 END), 0)::int AS coupons_used,
+        COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN coupon_discount_amount ELSE 0 END), 0)::float AS coupon_discount_total
+      FROM pos_orders
+      WHERE created_at >= ${fromIso}::timestamp
+      AND created_at <= ${toIso}::timestamp
+    `,
+    sql`
+      SELECT COUNT(*)::int AS fast_pay_reward_coupons_issued
+      FROM user_coupons
+      WHERE source = 'FAST_PAY_AUTHORIZED'
+      AND created_at >= ${fromIso}::timestamp
+      AND created_at <= ${toIso}::timestamp
+    `,
+    sql`
+      SELECT COUNT(*)::int AS new_members_registered_today
+      FROM customers
+      WHERE created_at >= ${fromIso}::timestamp
+      AND created_at <= ${toIso}::timestamp
+    `,
+    sql`
+      SELECT
+        pi.id AS payment_intent_id,
+        pi.order_id AS intent_order_id,
+        pi.amount_musd::float AS amount_musd,
+        pi.status,
+        pi.payment_flow,
+        pi.payer_wallet,
+        pi.tx_hash,
+        pi.block_number,
+        pi.created_at,
+        po.id AS pos_order_id,
+        po.order_no,
+        po.customer_wallet,
+        po.total_amount::float AS pos_total_amount,
+        po.payment_status
+      FROM payment_intents pi
+      LEFT JOIN pos_orders po
+        ON pi.tx_hash IS NOT NULL
+        AND po.payment_tx_hash IS NOT NULL
+        AND LOWER(pi.tx_hash) = LOWER(po.payment_tx_hash)
+      WHERE pi.created_at >= ${fromIso}::timestamp
+      AND pi.created_at <= ${toIso}::timestamp
+      ORDER BY pi.created_at DESC
+      LIMIT 100
+    `,
+    sql`
+      SELECT
+        id,
+        sender,
+        recipient,
+        amount::float AS amount_musd,
+        status,
+        transaction_hash,
+        created_at
+      FROM transactions
+      WHERE created_at >= ${fromIso}::timestamp
+      AND created_at <= ${toIso}::timestamp
+      AND transaction_hash IS NOT NULL
+      ORDER BY created_at DESC
+      LIMIT 100
+    `
+  ]);
+
+  const paymentMap = new Map<ReconciliationPaymentMethod, { orderCount: number; amount: number }>();
+  for (const row of paymentRows as any[]) {
+    const key = normalizeReconciliationPaymentKey(String(row.method_key || 'other'));
+    const current = paymentMap.get(key) || { orderCount: 0, amount: 0 };
+    paymentMap.set(key, {
+      orderCount: current.orderCount + Number(row.order_count || 0),
+      amount: roundMoney2(current.amount + Number(row.amount || 0))
+    });
+  }
+
+  const paymentOrder: ReconciliationPaymentMethod[] = [
+    'cash',
+    'card',
+    'stored_value',
+    'musd_wallet',
+    'musd_fast_pay',
+    'other_wallet',
+    'other'
+  ];
+  const paymentSummary = paymentOrder.map((key) => {
+    const row = paymentMap.get(key) || { orderCount: 0, amount: 0 };
+    return {
+      key,
+      paymentMethod: paymentMethodLabel(key),
+      orderCount: row.orderCount,
+      amount: roundMoney2(row.amount),
+      blockchain: key === 'musd_wallet' || key === 'musd_fast_pay' || key === 'other_wallet'
+    };
+  });
+
+  const musdWalletPaymentTotal = roundMoney2(paymentMap.get('musd_wallet')?.amount || 0);
+  const musdFastPayTotal = roundMoney2(paymentMap.get('musd_fast_pay')?.amount || 0);
+  const otherWalletTotal = roundMoney2(paymentMap.get('other_wallet')?.amount || 0);
+  const blockchainSettlementTotal = roundMoney2(musdWalletPaymentTotal + musdFastPayTotal + otherWalletTotal);
+  const musdPaymentCount =
+    (paymentMap.get('musd_wallet')?.orderCount || 0) +
+    (paymentMap.get('musd_fast_pay')?.orderCount || 0);
+
+  const confirmedIntentCount = (blockchainRows as any[]).filter((row) => row.status === 'confirmed').length;
+  const pendingIntentCount = (blockchainRows as any[]).filter((row) => row.status === 'pending' || row.status === 'detected').length;
+  const failedIntentCount = (blockchainRows as any[]).filter((row) => row.status === 'failed' || row.status === 'expired').length;
+  const fastPayConfirmedCount = (transactionRows as any[]).filter((row) => row.status === 'success').length;
+
+  const blockchainTransactions = [
+    ...(blockchainRows as any[]).map((row) => ({
+      orderId: row.pos_order_id || row.intent_order_id || '',
+      orderNo: row.order_no || row.intent_order_id || '',
+      paymentIntentId: row.payment_intent_id || '',
+      txHash: row.tx_hash || '',
+      walletAddress: row.payer_wallet || row.customer_wallet || '',
+      blockNumber: row.block_number == null ? null : Number(row.block_number),
+      amount: roundMoney2(Number(row.pos_total_amount || row.amount_musd || 0)),
+      status: row.status || 'pending',
+      paymentFlow: row.payment_flow || 'musd_scan_to_pay',
+      createdAt: toIsoString(row.created_at),
+      explorerUrl: row.tx_hash ? `https://explorer.test.mezo.org/tx/${row.tx_hash}` : null
+    })),
+    ...(transactionRows as any[]).map((row) => ({
+      orderId: row.id || '',
+      orderNo: row.id || '',
+      paymentIntentId: '',
+      txHash: row.transaction_hash || '',
+      walletAddress: row.sender || '',
+      blockNumber: null,
+      amount: roundMoney2(Number(row.amount_musd || 0)),
+      status: row.status || 'success',
+      paymentFlow: 'musd_fast_pay',
+      createdAt: toIsoString(row.created_at),
+      explorerUrl: row.transaction_hash ? `https://explorer.test.mezo.org/tx/${row.transaction_hash}` : null
+    }))
+  ].filter((row) => row.txHash || row.paymentIntentId).slice(0, 100);
+
+  const totalsRow = (totalsRows as any[])[0] || {};
+  const statusRow = (statusRows as any[])[0] || {};
+  const membershipRow = (membershipRows as any[])[0] || {};
+  const couponIssueRow = (couponIssueRows as any[])[0] || {};
+  const customerRow = (customerRows as any[])[0] || {};
+
+  return {
+    storeName: 'Mezo',
+    from: fromIso,
+    to: toIso,
+    paymentSummary,
+    blockchainSummary: {
+      totalBlockchainPayments: roundMoney2(blockchainSettlementTotal),
+      musdWalletPaymentTotal,
+      musdFastPayTotal,
+      blockchainSettlementTotal,
+      onChainConfirmedOrders: confirmedIntentCount + fastPayConfirmedCount,
+      pendingBlockchainConfirmation: pendingIntentCount,
+      failedExpiredBlockchainPayments: failedIntentCount
+    },
+    orderStatusSummary: {
+      paidOrders: Number(statusRow.paid_orders || 0),
+      pendingOrders: Number(statusRow.pending_orders || 0),
+      cancelledOrders: Number(statusRow.cancelled_orders || 0),
+      refundedOrders: Number(statusRow.refunded_orders || 0)
+    },
+    membershipSummary: {
+      memberOrders: Number(membershipRow.member_orders || 0),
+      nonMemberOrders: Number(membershipRow.non_member_orders || 0),
+      couponsUsed: Number(membershipRow.coupons_used || 0),
+      couponDiscountTotal: roundMoney2(Number(membershipRow.coupon_discount_total || 0)),
+      fastPayRewardCouponsIssued: Number(couponIssueRow.fast_pay_reward_coupons_issued || 0),
+      newMembersRegisteredToday: Number(customerRow.new_members_registered_today || 0)
+    },
+    totals: {
+      totalOrders: Number(totalsRow.total_orders || 0),
+      grossSalesAmount: roundMoney2(Number(totalsRow.gross_sales_amount || 0)),
+      discountAmount: roundMoney2(Number(totalsRow.discount_amount || 0)),
+      refundAmount: roundMoney2(Number(totalsRow.refund_amount || 0)),
+      netPaidAmount: roundMoney2(Number(totalsRow.net_paid_amount || 0)),
+      blockchainPaymentTotal: blockchainSettlementTotal,
+      musdPaymentCount
+    },
+    blockchainTransactions,
+    printedAt: new Date().toISOString()
+  };
+}

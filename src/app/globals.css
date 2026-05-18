@@ -12,6 +12,10 @@
 }
 
 @media print {
+  @page {
+    margin: 8mm;
+  }
+
   body {
     background: white;
   }
@@ -30,5 +34,25 @@
     width: 320px;
     max-width: 320px;
     box-shadow: none !important;
+  }
+
+  .reconciliation-print {
+    width: 100%;
+    max-width: none;
+    color: black;
+    font-size: 11px;
+  }
+
+  .reconciliation-print section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .reconciliation-print table,
+  .reconciliation-print tr,
+  .reconciliation-print td,
+  .reconciliation-print th {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 }
