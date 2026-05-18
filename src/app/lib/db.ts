@@ -102,19 +102,39 @@ export const getSql = () => {
   return cachedSql;
 };
 
+/**
+ * Database initialization guard - ensures schema init runs only once per process
+ */
 let initPromise: Promise<void> | null = null;
+let isInitialized = false;
 
 export async function ensureDb() {
+  // Fast path: if already initialized, return immediately
+  if (isInitialized) {
+    return;
+  }
+
+  // If initialization is in progress, wait for it
   if (initPromise) {
     await initPromise;
     return;
   }
 
+  // Start initialization with timing
+  const startTime = Date.now();
+  console.log('[DB Init] start');
+
   initPromise = (async () => {
     try {
       await initDb();
+      isInitialized = true;
+      const duration = Date.now() - startTime;
+      console.log(`[DB Init] completed in ${duration}ms`);
     } catch (error) {
-      console.error('Database initialization failed:', error);
+      console.error('[DB Init] failed:', error);
+      // Reset guards on failure so next request can retry
+      initPromise = null;
+      isInitialized = false;
       throw error;
     }
   })();
@@ -142,238 +162,323 @@ export async function updateSetting(key: string, value: string) {
 }
 
 /**
- * Initialize Database Schema with automatic Sync
- * Uses SCHEMA_DEFINITION as the source of truth.
+ * Initialize Database Schema with Migration System
+ * Uses SCHEMA_DEFINITION as the source of truth with versioned migrations.
  */
 export async function initDb() {
   const sql = getSql();
-  console.log('Starting dynamic database schema sync...');
+  const isDev = process.env.NODE_ENV !== 'production';
+  
+  console.log('[DB Init] Starting database initialization...');
+  console.log(`[DB Init] Environment: ${isDev ? 'development' : 'production'}`);
 
   try {
-    for (const [tableName, columns] of Object.entries(SCHEMA_DEFINITION)) {
-      // 1. Create table if not exists with at least the first column
-      const colNames = Object.keys(columns);
-      const firstCol = colNames[0];
-      const firstColDef = columns[firstCol as keyof typeof columns];
+    // Step 1: Create migrations table if not exists (lightweight check)
+    await sql(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        id TEXT PRIMARY KEY,
+        applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        description TEXT
+      )
+    `);
 
-      // Basic creation if not exists (neon() returns a query fn, not pg Pool — use sql(string), not .query())
-      await sql(`CREATE TABLE IF NOT EXISTS ${tableName} (${firstCol} ${firstColDef})`);
+    // Step 2: Check which migrations have been applied
+    const appliedMigrations = await sql`SELECT id FROM schema_migrations ORDER BY id`;
+    const appliedIds = new Set(appliedMigrations.map((row: any) => row.id));
 
-      // 2. Check each column and ALTER if missing
-      for (const [colName, colDef] of Object.entries(columns)) {
-        // Skip the first column as it's handled by CREATE TABLE
-        if (colName === firstCol) continue;
+    // Step 3: Define migrations in order
+    const migrations = [
+      {
+        id: '001_init_schema',
+        description: 'Initialize base schema from SCHEMA_DEFINITION',
+        run: async () => {
+          console.log('[DB Init] Applying migration: 001_init_schema');
+          
+          // Create tables and columns based on schema definition
+          for (const [tableName, columns] of Object.entries(SCHEMA_DEFINITION)) {
+            const colNames = Object.keys(columns);
+            const firstCol = colNames[0];
+            const firstColDef = columns[firstCol as keyof typeof columns];
 
-        const columnExists = await sql`
-          SELECT 1 
-          FROM information_schema.columns 
-          WHERE table_name = ${tableName} 
-          AND column_name = ${colName}
-        `;
+            // Create table if not exists
+            await sql(`CREATE TABLE IF NOT EXISTS ${tableName} (${firstCol} ${firstColDef})`);
 
-        if (columnExists.length === 0) {
-          console.log(`[Schema Sync] Adding missing column: ${colName} to ${tableName}`);
-          await sql(`ALTER TABLE ${tableName} ADD COLUMN ${colName} ${colDef}`);
+            // Check and add missing columns
+            for (const [colName, colDef] of Object.entries(columns)) {
+              if (colName === firstCol) continue;
+
+              const columnExists = await sql`
+                SELECT 1 
+                FROM information_schema.columns 
+                WHERE table_name = ${tableName} 
+                AND column_name = ${colName}
+              `;
+
+              if (columnExists.length === 0) {
+                console.log(`[DB Init] Adding column: ${tableName}.${colName}`);
+                await sql(`ALTER TABLE ${tableName} ADD COLUMN ${colName} ${colDef}`);
+              }
+            }
+          }
+          
+          console.log('[DB Init] Base schema synchronized');
+        }
+      },
+      {
+        id: '002_fix_wallet_nullable',
+        description: 'Make wallet_address nullable in customers table',
+        run: async () => {
+          console.log('[DB Init] Applying migration: 002_fix_wallet_nullable');
+          await sql(`ALTER TABLE customers ALTER COLUMN wallet_address DROP NOT NULL`);
+        }
+      },
+      {
+        id: '003_create_indexes',
+        description: 'Create performance indexes',
+        run: async () => {
+          console.log('[DB Init] Applying migration: 003_create_indexes');
+          await sql(`
+            CREATE UNIQUE INDEX IF NOT EXISTS user_coupons_wallet_source_ref_idx
+            ON user_coupons (LOWER(customer_wallet), source, source_ref)
+          `);
+          await sql(`
+            CREATE INDEX IF NOT EXISTS payment_intents_order_id_idx
+            ON payment_intents (order_id)
+          `);
+          await sql(`
+            CREATE UNIQUE INDEX IF NOT EXISTS payment_intents_tx_hash_unique_idx
+            ON payment_intents (LOWER(tx_hash))
+            WHERE tx_hash IS NOT NULL
+          `);
+        }
+      },
+      {
+        id: '004_seed_demo_data',
+        description: 'Seed demo staff, member levels, customers, and products',
+        run: async () => {
+          console.log('[DB Init] Applying migration: 004_seed_demo_data');
+          
+          // Seed demo staff
+          const demoStaff = await sql`SELECT 1 FROM staff WHERE staff_id = 'STAFF001'`;
+          if (demoStaff.length === 0) {
+            console.log('[DB Init] Seeding demo staff member');
+            await sql`
+              INSERT INTO staff (id, username, password_hash, staff_id)
+              VALUES ('s1', 'demo_staff', 'hashed_pass', 'STAFF001')
+            `;
+          }
+
+          // Seed member levels
+          const memberLevels = [
+            { id: 'level_member', level_code: 'member', level_name: 'Member', min_spend_amount: 0, discount_rate: 0, sort_order: 1 },
+            { id: 'level_silver', level_code: 'silver', level_name: 'Silver', min_spend_amount: 100, discount_rate: 0.02, sort_order: 2 },
+            { id: 'level_gold', level_code: 'gold', level_name: 'Gold', min_spend_amount: 1000, discount_rate: 0.05, sort_order: 3 },
+            { id: 'level_platinum', level_code: 'platinum', level_name: 'Platinum', min_spend_amount: 5000, discount_rate: 0.08, sort_order: 4 }
+          ];
+
+          for (const level of memberLevels) {
+            await sql`
+              INSERT INTO member_levels (
+                id, level_code, level_name, min_spend_amount, discount_rate, sort_order, is_active
+              )
+              VALUES (
+                ${level.id},
+                ${level.level_code},
+                ${level.level_name},
+                ${level.min_spend_amount},
+                ${level.discount_rate},
+                ${level.sort_order},
+                TRUE
+              )
+              ON CONFLICT (level_code) DO UPDATE SET
+                level_name = EXCLUDED.level_name,
+                min_spend_amount = EXCLUDED.min_spend_amount,
+                discount_rate = EXCLUDED.discount_rate,
+                sort_order = EXCLUDED.sort_order,
+                is_active = TRUE
+            `;
+          }
+
+          // Seed demo customers
+          const demoCustomers = [
+            { id: 'cust_demo_member', username: 'Mia Member', referral_id: 'MEM_MEMBER', level: 1, total_spent: 0 },
+            { id: 'cust_demo_silver', username: 'Sam Silver', referral_id: 'MEM_SILVER', level: 2, total_spent: 100 },
+            { id: 'cust_demo_gold', username: 'Grace Gold', referral_id: 'MEM_GOLD', level: 3, total_spent: 1000 },
+            { id: 'cust_demo_platinum', username: 'Parker Platinum', referral_id: 'MEM_PLATINUM', level: 4, total_spent: 5000 }
+          ];
+
+          for (const customer of demoCustomers) {
+            await sql`
+              INSERT INTO customers (id, username, referral_id, level, total_spent)
+              VALUES (
+                ${customer.id},
+                ${customer.username},
+                ${customer.referral_id},
+                ${customer.level},
+                ${customer.total_spent}
+              )
+              ON CONFLICT (referral_id) DO UPDATE SET
+                username = EXCLUDED.username,
+                level = EXCLUDED.level,
+                total_spent = GREATEST(customers.total_spent, EXCLUDED.total_spent)
+            `;
+          }
+
+          // Seed demo products
+          const demoProducts = [
+            {
+              id: 'prod_demo_tee_black_m',
+              barcode: 'SHOPOS100',
+              sku: 'MEZO-TEE-BLK-M',
+              name: 'Mezo Logo Tee',
+              category: 'Tops',
+              brand: 'ShopOS',
+              color: 'Black',
+              size: 'M',
+              price: 100,
+              stock_qty: 24,
+              image_url: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?q=80&w=600&auto=format&fit=crop'
+            },
+            {
+              id: 'prod_demo_hoodie_green_l',
+              barcode: 'SHOPOS500',
+              sku: 'MEZO-HOOD-GRN-L',
+              name: 'Passport Hoodie',
+              category: 'Outerwear',
+              brand: 'ShopOS',
+              color: 'Forest',
+              size: 'L',
+              price: 500,
+              stock_qty: 12,
+              image_url: 'https://images.unsplash.com/photo-1556821840-3a63f95609a7?q=80&w=600&auto=format&fit=crop'
+            },
+            {
+              id: 'prod_demo_jacket_silver_m',
+              barcode: 'SHOPOS1000',
+              sku: 'MEZO-JKT-SLV-M',
+              name: 'Hackathon Tech Jacket',
+              category: 'Outerwear',
+              brand: 'ShopOS',
+              color: 'Silver',
+              size: 'M',
+              price: 1000,
+              stock_qty: 8,
+              image_url: 'https://images.unsplash.com/photo-1543076447-215ad9ba6923?q=80&w=600&auto=format&fit=crop'
+            },
+            {
+              id: 'prod_demo_tote_cream',
+              barcode: 'SHOPOS200',
+              sku: 'MEZO-TOTE-CRM',
+              name: 'Canvas City Tote',
+              category: 'Bags',
+              brand: 'ShopOS',
+              color: 'Cream',
+              size: 'One Size',
+              price: 180,
+              stock_qty: 18,
+              image_url: 'https://images.unsplash.com/photo-1590874103328-eac38a683ce7?q=80&w=600&auto=format&fit=crop'
+            },
+            {
+              id: 'prod_demo_sneaker_white_42',
+              barcode: 'SHOPOS300',
+              sku: 'MEZO-SNK-WHT-42',
+              name: 'Everyday Leather Sneaker',
+              category: 'Shoes',
+              brand: 'ShopOS',
+              color: 'White',
+              size: '42',
+              price: 320,
+              stock_qty: 16,
+              image_url: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?q=80&w=600&auto=format&fit=crop'
+            },
+            {
+              id: 'prod_demo_cap_orange',
+              barcode: 'SHOPOS400',
+              sku: 'MEZO-CAP-ORG',
+              name: 'Orange Logo Cap',
+              category: 'Accessories',
+              brand: 'ShopOS',
+              color: 'Orange',
+              size: 'Adjustable',
+              price: 90,
+              stock_qty: 30,
+              image_url: 'https://images.unsplash.com/photo-1521369909029-2afed882baee?q=80&w=600&auto=format&fit=crop'
+            }
+          ];
+
+          for (const product of demoProducts) {
+            await sql`
+              INSERT INTO products (id, barcode, sku, name, category, brand, color, size, price, currency, stock_qty, image_url, is_active)
+              VALUES (
+                ${product.id},
+                ${product.barcode},
+                ${product.sku},
+                ${product.name},
+                ${product.category},
+                ${product.brand},
+                ${product.color},
+                ${product.size},
+                ${product.price},
+                'MUSD',
+                ${product.stock_qty},
+                ${product.image_url},
+                TRUE
+              )
+              ON CONFLICT (barcode) DO UPDATE SET
+                name = EXCLUDED.name,
+                category = EXCLUDED.category,
+                brand = EXCLUDED.brand,
+                color = EXCLUDED.color,
+                size = EXCLUDED.size,
+                price = EXCLUDED.price,
+                currency = EXCLUDED.currency,
+                stock_qty = GREATEST(products.stock_qty, EXCLUDED.stock_qty),
+                image_url = EXCLUDED.image_url,
+                is_active = TRUE
+            `;
+          }
+          
+          console.log('[DB Init] Demo data seeded');
         }
       }
-    }
-
-    console.log('Database schema synchronized successfully based on definition');
-
-    // Phase 1 FIX: Ensure wallet_address is nullable in customers table for new dual-scan workflow
-    await sql(`ALTER TABLE customers ALTER COLUMN wallet_address DROP NOT NULL`);
-    await sql(`
-      CREATE UNIQUE INDEX IF NOT EXISTS user_coupons_wallet_source_ref_idx
-      ON user_coupons (LOWER(customer_wallet), source, source_ref)
-    `);
-    await sql(`
-      CREATE INDEX IF NOT EXISTS payment_intents_order_id_idx
-      ON payment_intents (order_id)
-    `);
-    await sql(`
-      CREATE UNIQUE INDEX IF NOT EXISTS payment_intents_tx_hash_unique_idx
-      ON payment_intents (LOWER(tx_hash))
-      WHERE tx_hash IS NOT NULL
-    `);
-
-    // Seed a demo staff member if none exists
-    const demoStaff = await sql`SELECT 1 FROM staff WHERE staff_id = 'STAFF001'`;
-    if (demoStaff.length === 0) {
-      console.log('[Seed] Seeding demo staff member...');
-      await sql`
-        INSERT INTO staff (id, username, password_hash, staff_id)
-        VALUES ('s1', 'demo_staff', 'hashed_pass', 'STAFF001')
-      `;
-    }
-
-    const memberLevels = [
-      { id: 'level_member', level_code: 'member', level_name: 'Member', min_spend_amount: 0, discount_rate: 0, sort_order: 1 },
-      { id: 'level_silver', level_code: 'silver', level_name: 'Silver', min_spend_amount: 100, discount_rate: 0.02, sort_order: 2 },
-      { id: 'level_gold', level_code: 'gold', level_name: 'Gold', min_spend_amount: 1000, discount_rate: 0.05, sort_order: 3 },
-      { id: 'level_platinum', level_code: 'platinum', level_name: 'Platinum', min_spend_amount: 5000, discount_rate: 0.08, sort_order: 4 }
     ];
 
-    for (const level of memberLevels) {
-      await sql`
-        INSERT INTO member_levels (
-          id, level_code, level_name, min_spend_amount, discount_rate, sort_order, is_active
-        )
-        VALUES (
-          ${level.id},
-          ${level.level_code},
-          ${level.level_name},
-          ${level.min_spend_amount},
-          ${level.discount_rate},
-          ${level.sort_order},
-          TRUE
-        )
-        ON CONFLICT (level_code) DO UPDATE SET
-          level_name = EXCLUDED.level_name,
-          min_spend_amount = EXCLUDED.min_spend_amount,
-          discount_rate = EXCLUDED.discount_rate,
-          sort_order = EXCLUDED.sort_order,
-          is_active = TRUE
-      `;
-    }
-
-    const demoCustomers = [
-      { id: 'cust_demo_member', username: 'Mia Member', referral_id: 'MEM_MEMBER', level: 1, total_spent: 0 },
-      { id: 'cust_demo_silver', username: 'Sam Silver', referral_id: 'MEM_SILVER', level: 2, total_spent: 100 },
-      { id: 'cust_demo_gold', username: 'Grace Gold', referral_id: 'MEM_GOLD', level: 3, total_spent: 1000 },
-      { id: 'cust_demo_platinum', username: 'Parker Platinum', referral_id: 'MEM_PLATINUM', level: 4, total_spent: 5000 }
-    ];
-
-    for (const customer of demoCustomers) {
-      await sql`
-        INSERT INTO customers (id, username, referral_id, level, total_spent)
-        VALUES (
-          ${customer.id},
-          ${customer.username},
-          ${customer.referral_id},
-          ${customer.level},
-          ${customer.total_spent}
-        )
-        ON CONFLICT (referral_id) DO UPDATE SET
-          username = EXCLUDED.username,
-          level = EXCLUDED.level,
-          total_spent = GREATEST(customers.total_spent, EXCLUDED.total_spent)
-      `;
-    }
-
-    const demoProducts = [
-      {
-        id: 'prod_demo_tee_black_m',
-        barcode: 'SHOPOS100',
-        sku: 'MEZO-TEE-BLK-M',
-        name: 'Mezo Logo Tee',
-        category: 'Tops',
-        brand: 'ShopOS',
-        color: 'Black',
-        size: 'M',
-        price: 100,
-        stock_qty: 24,
-        image_url: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?q=80&w=600&auto=format&fit=crop'
-      },
-      {
-        id: 'prod_demo_hoodie_green_l',
-        barcode: 'SHOPOS500',
-        sku: 'MEZO-HOOD-GRN-L',
-        name: 'Passport Hoodie',
-        category: 'Outerwear',
-        brand: 'ShopOS',
-        color: 'Forest',
-        size: 'L',
-        price: 500,
-        stock_qty: 12,
-        image_url: 'https://images.unsplash.com/photo-1556821840-3a63f95609a7?q=80&w=600&auto=format&fit=crop'
-      },
-      {
-        id: 'prod_demo_jacket_silver_m',
-        barcode: 'SHOPOS1000',
-        sku: 'MEZO-JKT-SLV-M',
-        name: 'Hackathon Tech Jacket',
-        category: 'Outerwear',
-        brand: 'ShopOS',
-        color: 'Silver',
-        size: 'M',
-        price: 1000,
-        stock_qty: 8,
-        image_url: 'https://images.unsplash.com/photo-1543076447-215ad9ba6923?q=80&w=600&auto=format&fit=crop'
-      },
-      {
-        id: 'prod_demo_tote_cream',
-        barcode: 'SHOPOS200',
-        sku: 'MEZO-TOTE-CRM',
-        name: 'Canvas City Tote',
-        category: 'Bags',
-        brand: 'ShopOS',
-        color: 'Cream',
-        size: 'One Size',
-        price: 180,
-        stock_qty: 18,
-        image_url: 'https://images.unsplash.com/photo-1590874103328-eac38a683ce7?q=80&w=600&auto=format&fit=crop'
-      },
-      {
-        id: 'prod_demo_sneaker_white_42',
-        barcode: 'SHOPOS300',
-        sku: 'MEZO-SNK-WHT-42',
-        name: 'Everyday Leather Sneaker',
-        category: 'Shoes',
-        brand: 'ShopOS',
-        color: 'White',
-        size: '42',
-        price: 320,
-        stock_qty: 16,
-        image_url: 'https://images.unsplash.com/photo-1549298916-b41d501d3772?q=80&w=600&auto=format&fit=crop'
-      },
-      {
-        id: 'prod_demo_cap_orange',
-        barcode: 'SHOPOS400',
-        sku: 'MEZO-CAP-ORG',
-        name: 'Orange Logo Cap',
-        category: 'Accessories',
-        brand: 'ShopOS',
-        color: 'Orange',
-        size: 'Adjustable',
-        price: 90,
-        stock_qty: 30,
-        image_url: 'https://images.unsplash.com/photo-1521369909029-2afed882baee?q=80&w=600&auto=format&fit=crop'
+    // Step 4: Apply pending migrations
+    let appliedCount = 0;
+    for (const migration of migrations) {
+      if (!appliedIds.has(migration.id)) {
+        console.log(`[DB Init] Running migration: ${migration.id} - ${migration.description}`);
+        
+        try {
+          await migration.run();
+          
+          // Record migration as applied
+          await sql`
+            INSERT INTO schema_migrations (id, description)
+            VALUES (${migration.id}, ${migration.description})
+          `;
+          
+          appliedCount++;
+          console.log(`[DB Init] Migration ${migration.id} applied successfully`);
+        } catch (error) {
+          console.error(`[DB Init] Migration ${migration.id} failed:`, error);
+          throw error;
+        }
+      } else {
+        console.log(`[DB Init] Skipping migration ${migration.id} (already applied)`);
       }
-    ];
-
-    for (const product of demoProducts) {
-      await sql`
-        INSERT INTO products (id, barcode, sku, name, category, brand, color, size, price, currency, stock_qty, image_url, is_active)
-        VALUES (
-          ${product.id},
-          ${product.barcode},
-          ${product.sku},
-          ${product.name},
-          ${product.category},
-          ${product.brand},
-          ${product.color},
-          ${product.size},
-          ${product.price},
-          'MUSD',
-          ${product.stock_qty},
-          ${product.image_url},
-          TRUE
-        )
-        ON CONFLICT (barcode) DO UPDATE SET
-          name = EXCLUDED.name,
-          category = EXCLUDED.category,
-          brand = EXCLUDED.brand,
-          color = EXCLUDED.color,
-          size = EXCLUDED.size,
-          price = EXCLUDED.price,
-          currency = EXCLUDED.currency,
-          stock_qty = GREATEST(products.stock_qty, EXCLUDED.stock_qty),
-          image_url = EXCLUDED.image_url,
-          is_active = TRUE
-      `;
     }
+
+    if (appliedCount === 0) {
+      console.log('[DB Init] All migrations already applied, skipping');
+    } else {
+      console.log(`[DB Init] Applied ${appliedCount} migration(s)`);
+    }
+
+    console.log('[DB Init] Database initialization completed successfully');
   } catch (err) {
-    console.error('Database schema synchronization failed:', err);
+    console.error('[DB Init] Database initialization failed:', err);
+    throw err;
   }
 }
 
