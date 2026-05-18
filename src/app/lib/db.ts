@@ -114,6 +114,16 @@ export async function ensureDb() {
     return;
   }
 
+  // Production optimization: skip runtime migration checks if explicitly disabled
+  const skipInit = process.env.SKIP_DB_INIT === 'true';
+  const isProduction = process.env.NODE_ENV === 'production';
+  
+  if (skipInit && isProduction) {
+    console.log('[DB Init] Skipped runtime migration check because SKIP_DB_INIT=true');
+    isInitialized = true;
+    return;
+  }
+
   // If initialization is in progress, wait for it
   if (initPromise) {
     await initPromise;

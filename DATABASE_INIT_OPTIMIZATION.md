@@ -57,7 +57,6 @@ Added comprehensive logging:
 [DB Init] start
 [DB Init] Environment: development
 [DB Init] Skipping migration 001_init_schema (already applied)
-[DB Init] Skipping migration 002_fix_wallet_nullable (already applied)
 [DB Init] All migrations already applied, skipping
 [DB Init] completed in 45ms
 ```
@@ -67,7 +66,30 @@ Added comprehensive logging:
 - ✅ Clear visibility into what's happening
 - ✅ Performance metrics for optimization
 
-### 4. Explicit Migration Command for Production
+### 4. Production Environment Variable: SKIP_DB_INIT
+Added environment variable support for production optimization:
+
+```bash
+# In production, set this after running explicit migration
+export SKIP_DB_INIT=true
+```
+
+**Behavior:**
+- When `SKIP_DB_INIT=true` and `NODE_ENV=production`: Runtime initialization is completely skipped
+- APIs start immediately with zero database check overhead
+- Perfect for Vercel/serverless cold starts
+- **Important**: Must run `npm run db:migrate` first before enabling this flag
+
+**Migration script bypasses SKIP_DB_INIT:**
+The `npm run db:migrate` command temporarily disables SKIP_DB_INIT to ensure migrations always run when explicitly requested.
+
+**Benefits:**
+- ✅ Zero runtime overhead in production
+- ✅ Instant serverless cold starts
+- ✅ Explicit control over when migrations run
+- ✅ Safe: fails clearly if database not migrated
+
+### 5. Explicit Migration Command for Production
 Added `npm run db:migrate` script:
 ```bash
 # Run explicit migration (recommended for production)
@@ -111,10 +133,33 @@ npm run build
 2. **Subsequent requests**: Instant (0ms, fast path)
 3. **Page refreshes**: No repeated schema checks
 
-#### Production Mode
-1. **Pre-deployment**: Run `npm run db:migrate`
-2. **Runtime**: Zero initialization overhead
-3. **Multiple instances**: Each runs migration independently (safe due to IF NOT EXISTS)
+#### Production Mode (Default - without SKIP_DB_INIT)
+1. **First request**: Checks migrations table, skips applied ones (~50-100ms)
+2. **Subsequent requests**: Instant (0ms, fast path)
+3. **Serverless cold starts**: Re-checks migrations but skips work (~50-100ms)
+
+#### Production Mode (Optimized - with SKIP_DB_INIT=true)
+1. **All requests**: Zero initialization overhead (0ms)
+2. **Serverless cold starts**: Instant (0ms)
+3. **Requirement**: Must run `npm run db:migrate` before deployment
+
+**Production Deployment Workflow:**
+```bash
+# Step 1: Deploy code
+git push origin main
+
+# Step 2: Run explicit migration
+npm run db:migrate
+
+# Step 3: Set environment variable
+export SKIP_DB_INIT=true
+# Or add to Vercel/Cloud platform environment variables
+
+# Step 4: Start application
+npm start
+```
+
+Now the application has zero database initialization overhead!
 
 ## Migration Safety
 

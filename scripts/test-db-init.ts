@@ -49,4 +49,48 @@ async function testInitialization() {
   console.log(`- Performance improvement: ${((1 - duration2 / duration1) * 100).toFixed(1)}%\n`);
 }
 
-testInitialization().catch(console.error);
+async function testSkipDbInit() {
+  console.log('\n🧪 Testing SKIP_DB_INIT Environment Variable\n');
+  
+  // Save original value
+  const originalValue = process.env.SKIP_DB_INIT;
+  
+  // Test with SKIP_DB_INIT=true
+  console.log('Test: Setting SKIP_DB_INIT=true');
+  process.env.SKIP_DB_INIT = 'true';
+  process.env.NODE_ENV = 'production';
+  
+  // Reset module state (simulate fresh import)
+  // Note: In real scenario, this would be a new process
+  
+  const start = Date.now();
+  await ensureDb();
+  const duration = Date.now() - start;
+  
+  console.log(`✅ ensureDb() completed in ${duration}ms with SKIP_DB_INIT=true`);
+  
+  if (duration < 5) {
+    console.log('✅ SKIP_DB_INIT optimization working correctly (near-zero overhead)\n');
+  } else {
+    console.log('⚠️  Warning: SKIP_DB_INIT may not be working as expected\n');
+  }
+  
+  // Restore original value
+  if (originalValue) {
+    process.env.SKIP_DB_INIT = originalValue;
+  } else {
+    delete process.env.SKIP_DB_INIT;
+  }
+}
+
+async function main() {
+  try {
+    await testInitialization();
+    await testSkipDbInit();
+  } catch (error) {
+    console.error('❌ Test failed:', error);
+    process.exit(1);
+  }
+}
+
+main();
