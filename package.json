@@ -7,6 +7,7 @@
     "build": "NODE_ENV=production next build",
     "start": "next start",
     "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:test-init": "tsx scripts/test-db-init.ts",
     "deploy:pull-payment": "node scripts/deploy-shopos-pull-payment.js",
     "test:goldsky": "node scripts/test-goldsky-webhook-decoder.js"
   },
