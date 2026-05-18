@@ -144,6 +144,10 @@ function formatRange(from: string, to: string) {
   return `${formatDateTime(from).slice(0, 16)} → ${formatDateTime(to).slice(0, 16)}`;
 }
 
+function safeIsoString(value: Date) {
+  return Number.isNaN(value.getTime()) ? '' : value.toISOString();
+}
+
 function money(value: number) {
   return `${Number(value || 0).toFixed(2)} MUSD`;
 }
@@ -151,6 +155,28 @@ function money(value: number) {
 function shortHash(value: string) {
   if (!value) return '-';
   return value.length > 18 ? `${value.slice(0, 10)}...${value.slice(-6)}` : value;
+}
+
+function paymentFlowLabel(value: string) {
+  const normalized = (value || '').toLowerCase();
+  if (normalized.includes('fast') || normalized.includes('pull')) return 'MUSD Fast Pay / Pull Payment';
+  if (normalized.includes('scan') || normalized.includes('wallet')) return 'MUSD Wallet Payment';
+  if (normalized.includes('musd')) return 'MUSD Payment';
+  return 'Blockchain Payment';
+}
+
+function statusTone(status: string) {
+  const normalized = (status || '').toLowerCase();
+  if (['confirmed', 'success', 'paid', 'succeeded'].includes(normalized)) {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  }
+  if (['pending', 'detected', 'processing'].includes(normalized)) {
+    return 'border-amber-200 bg-amber-50 text-amber-700';
+  }
+  if (['failed', 'expired', 'cancelled', 'canceled'].includes(normalized)) {
+    return 'border-red-200 bg-red-50 text-red-700';
+  }
+  return 'border-slate-200 bg-slate-100 text-slate-600';
 }
 
 export default function DailyReconciliationReportPage() {
@@ -165,6 +191,9 @@ export default function DailyReconciliationReportPage() {
 
   const selectedRange = useMemo(() => {
     if (filter !== 'custom') return rangeForFilter(filter);
+    if (!customFrom || !customTo) {
+      return { from: new Date(Number.NaN), to: new Date(Number.NaN) };
+    }
     return {
       from: startOfDay(new Date(`${customFrom}T00:00:00`)),
       to: endOfDay(new Date(`${customTo}T00:00:00`))
@@ -175,6 +204,9 @@ export default function DailyReconciliationReportPage() {
     setLoading(true);
     setError('');
     try {
+      if (Number.isNaN(selectedRange.from.getTime()) || Number.isNaN(selectedRange.to.getTime())) {
+        throw new Error('Select a valid custom date range.');
+      }
       const params = new URLSearchParams({
         from: selectedRange.from.toISOString(),
         to: selectedRange.to.toISOString()
@@ -186,8 +218,8 @@ export default function DailyReconciliationReportPage() {
     } catch (err: any) {
       setReport({
         ...emptyReport,
-        from: selectedRange.from.toISOString(),
-        to: selectedRange.to.toISOString(),
+        from: safeIsoString(selectedRange.from),
+        to: safeIsoString(selectedRange.to),
         printedAt: new Date().toISOString()
       });
       setError(err.message || 'Unable to load reconciliation report');
@@ -200,7 +232,15 @@ export default function DailyReconciliationReportPage() {
     loadReport();
   }, [loadReport]);
 
-  const blockchainRows = report.paymentSummary.filter((row) => row.blockchain);
+  const paymentSummaryTotal = report.paymentSummary.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const collectedOrderCount = report.paymentSummary.reduce((sum, row) => sum + Number(row.orderCount || 0), 0);
+  const paymentVariance = Number((paymentSummaryTotal - report.totals.netPaidAmount).toFixed(2));
+  const paymentMatchesNetPaid = Math.abs(paymentVariance) < 0.01;
+  const isEmptyPeriod = !loading && !error && report.totals.totalOrders === 0 && report.blockchainTransactions.length === 0;
+  const pendingOrFailedTransactions = report.blockchainTransactions.filter((tx) => {
+    const status = (tx.status || '').toLowerCase();
+    return ['pending', 'detected', 'processing', 'failed', 'expired'].includes(status);
+  });
 
   return (
     <main className="min-h-screen bg-slate-100 px-3 py-4 text-slate-950 print:bg-white print:p-0">
@@ -254,7 +294,7 @@ export default function DailyReconciliationReportPage() {
 
       {error ? (
         <div className="no-print mx-auto mb-4 max-w-5xl rounded-md border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700">
-          {error}
+          Report data could not be loaded. {error}
         </div>
       ) : null}
 
@@ -272,11 +312,39 @@ export default function DailyReconciliationReportPage() {
           </div>
         </header>
 
+        {loading ? (
+          <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-center text-sm font-black text-slate-600">
+            Loading reconciliation data...
+          </div>
+        ) : null}
+
+        {isEmptyPeriod ? (
+          <div className="mt-4 rounded-md border border-dashed border-slate-300 bg-slate-50 p-5 text-center">
+            <p className="text-base font-black text-slate-900">No transactions for this period</p>
+            <p className="mt-1 text-sm font-bold text-slate-500">The selected date range has no orders, payments, coupons, or blockchain activity.</p>
+          </div>
+        ) : null}
+
         <section className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
           <Kpi label="Total Orders" value={report.totals.totalOrders.toString()} />
           <Kpi label="Net Paid Amount" value={money(report.totals.netPaidAmount)} strong />
-          <Kpi label="Blockchain Total" value={money(report.totals.blockchainPaymentTotal)} blockchain />
+          <Kpi label="Total Blockchain Collected" value={money(report.totals.blockchainPaymentTotal)} blockchain strong />
           <Kpi label="MUSD Payment Count" value={report.totals.musdPaymentCount.toString()} blockchain />
+        </section>
+
+        <section className="mt-4 break-inside-avoid rounded-md border-2 border-orange-300 bg-orange-50 p-3 print:border-slate-400 print:bg-white">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase tracking-wide text-orange-700">Blockchain Revenue</p>
+              <p className="mt-1 text-2xl font-black text-slate-950">{money(report.blockchainSummary.blockchainSettlementTotal)}</p>
+              <p className="mt-1 text-xs font-bold text-slate-600">Confirmed MUSD wallet and Fast Pay collections for this range.</p>
+            </div>
+            <div className="grid grid-cols-1 gap-2 text-right sm:min-w-72">
+              <SummaryChip label="MUSD Wallet Payments" value={money(report.blockchainSummary.musdWalletPaymentTotal)} />
+              <SummaryChip label="MUSD Fast Pay / Pull Payments" value={money(report.blockchainSummary.musdFastPayTotal)} />
+              <SummaryChip label="Pending / Failed" value={`${report.blockchainSummary.pendingBlockchainConfirmation + report.blockchainSummary.failedExpiredBlockchainPayments}`} attention={pendingOrFailedTransactions.length > 0} />
+            </div>
+          </div>
         </section>
 
         <ReportSection title="1. Payment Summary">
@@ -300,19 +368,41 @@ export default function DailyReconciliationReportPage() {
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="bg-slate-100 print:bg-white">
+                <Td>
+                  <span className="font-black">Collected Total</span>
+                  <span className={`ml-2 rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${paymentMatchesNetPaid ? 'border-emerald-300 text-emerald-700' : 'border-amber-300 text-amber-700'}`}>
+                    {paymentMatchesNetPaid ? 'Matches Sales Totals' : 'Review Difference'}
+                  </span>
+                </Td>
+                <Td align="right">{collectedOrderCount}</Td>
+                <Td align="right">{money(paymentSummaryTotal)}</Td>
+              </tr>
+            </tfoot>
           </Table>
+          {!paymentMatchesNetPaid ? (
+            <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm font-bold text-amber-800 print:bg-white">
+              Payment Summary total differs from Net Paid Amount by {money(paymentVariance)}. The report remains available for review.
+            </div>
+          ) : null}
         </ReportSection>
 
         <ReportSection title="2. Blockchain Settlement Summary">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             <Metric label="Total Blockchain Payments" value={money(report.blockchainSummary.totalBlockchainPayments)} blockchain />
             <Metric label="MUSD Wallet Payment Total" value={money(report.blockchainSummary.musdWalletPaymentTotal)} blockchain />
-            <Metric label="MUSD Fast Pay Total" value={money(report.blockchainSummary.musdFastPayTotal)} blockchain />
-            <Metric label="Blockchain Settlement Total" value={money(report.blockchainSummary.blockchainSettlementTotal)} blockchain />
-            <Metric label="On-chain Confirmed Orders" value={report.blockchainSummary.onChainConfirmedOrders.toString()} />
-            <Metric label="Pending Blockchain Confirmation" value={report.blockchainSummary.pendingBlockchainConfirmation.toString()} />
-            <Metric label="Failed / Expired Blockchain Payments" value={report.blockchainSummary.failedExpiredBlockchainPayments.toString()} />
+            <Metric label="MUSD Fast Pay / Pull Payment Total" value={money(report.blockchainSummary.musdFastPayTotal)} blockchain />
+            <Metric label="Total Blockchain Collected" value={money(report.blockchainSummary.blockchainSettlementTotal)} blockchain strong />
+            <Metric label="Confirmed Blockchain Orders" value={report.blockchainSummary.onChainConfirmedOrders.toString()} />
+            <Metric label="Pending Confirmation" value={report.blockchainSummary.pendingBlockchainConfirmation.toString()} warn={report.blockchainSummary.pendingBlockchainConfirmation > 0} />
+            <Metric label="Failed / Expired Payments" value={report.blockchainSummary.failedExpiredBlockchainPayments.toString()} danger={report.blockchainSummary.failedExpiredBlockchainPayments > 0} />
           </div>
+          {pendingOrFailedTransactions.length > 0 ? (
+            <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-800 print:bg-white">
+              Pending or failed blockchain payments are listed separately in the transaction references below and are not counted as collected revenue.
+            </div>
+          ) : null}
         </ReportSection>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -369,27 +459,26 @@ export default function DailyReconciliationReportPage() {
                       <span className="min-w-0">
                         <span className="block text-sm font-black text-slate-950">{tx.orderNo || tx.orderId || 'Blockchain Payment'}</span>
                         <span className="block break-all text-slate-500">{shortHash(tx.txHash || tx.paymentIntentId)}</span>
+                        <span className="mt-0.5 block text-[11px] text-slate-500">{paymentFlowLabel(tx.paymentFlow)}</span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] uppercase">{tx.status}</span>
-                        <ChevronDown className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+                        <span className={`rounded-full border px-2 py-1 text-[10px] uppercase ${statusTone(tx.status)}`}>{tx.status || 'unknown'}</span>
+                        <ChevronDown className={`no-print h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
                       </span>
                     </button>
-                    {open ? (
-                      <div className="grid gap-2 border-t border-slate-200 p-3 text-xs font-bold text-slate-600 sm:grid-cols-2">
+                    <div className={`${open ? 'grid' : 'hidden'} gap-2 border-t border-slate-200 p-3 text-xs font-bold text-slate-600 sm:grid-cols-2 print:grid`}>
                         <DebugLine label="paymentIntentId" value={tx.paymentIntentId || '-'} />
                         <DebugLine label="txHash" value={tx.txHash || '-'} />
                         <DebugLine label="walletAddress" value={tx.walletAddress || '-'} />
                         <DebugLine label="blockNumber" value={tx.blockNumber == null ? '-' : tx.blockNumber.toString()} />
                         <DebugLine label="amount" value={money(tx.amount)} />
-                        <DebugLine label="paymentFlow" value={tx.paymentFlow || '-'} />
+                        <DebugLine label="Payment Type" value={paymentFlowLabel(tx.paymentFlow)} />
                         <DebugLine label="createdAt" value={formatDateTime(tx.createdAt)} />
                         <div>
                           <p className="text-slate-400">Explorer</p>
                           {tx.explorerUrl ? <a className="break-all text-orange-700 underline" href={tx.explorerUrl} target="_blank" rel="noreferrer">View on Explorer</a> : <p>-</p>}
                         </div>
-                      </div>
-                    ) : null}
+                    </div>
                   </div>
                 );
               })}
@@ -442,9 +531,25 @@ function Kpi({ label, value, strong, blockchain }: { label: string; value: strin
   );
 }
 
-function Metric({ label, value, strong, blockchain }: { label: string; value: string; strong?: boolean; blockchain?: boolean }) {
+function SummaryChip({ label, value, attention }: { label: string; value: string; attention?: boolean }) {
   return (
-    <div className={`rounded-md border px-3 py-2 ${blockchain ? 'border-orange-300 bg-orange-50 print:bg-white' : 'border-slate-300 bg-white'}`}>
+    <div className={`flex items-center justify-between gap-3 rounded-md border bg-white px-3 py-2 text-sm ${attention ? 'border-amber-300 text-amber-800' : 'border-orange-200 text-slate-800'}`}>
+      <span className="font-bold">{label}</span>
+      <span className="font-black">{value}</span>
+    </div>
+  );
+}
+
+function Metric({ label, value, strong, blockchain, warn, danger }: { label: string; value: string; strong?: boolean; blockchain?: boolean; warn?: boolean; danger?: boolean }) {
+  const tone = danger
+    ? 'border-red-300 bg-red-50 print:bg-white'
+    : warn
+      ? 'border-amber-300 bg-amber-50 print:bg-white'
+      : blockchain
+        ? 'border-orange-300 bg-orange-50 print:bg-white'
+        : 'border-slate-300 bg-white';
+  return (
+    <div className={`rounded-md border px-3 py-2 ${tone}`}>
       <p className="text-xs font-bold text-slate-500">{label}</p>
       <p className={`mt-1 text-base ${strong ? 'font-black text-slate-950' : 'font-bold text-slate-800'}`}>{value}</p>
     </div>

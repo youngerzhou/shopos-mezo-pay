@@ -16,8 +16,11 @@
     margin: 8mm;
   }
 
+  html,
   body {
     background: white;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 
   .no-print {
@@ -44,6 +47,11 @@
   }
 
   .reconciliation-print section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .reconciliation-print .break-inside-avoid {
     break-inside: avoid;
     page-break-inside: avoid;
   }

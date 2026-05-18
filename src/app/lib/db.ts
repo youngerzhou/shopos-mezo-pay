@@ -1337,6 +1337,7 @@ export async function getDailyReconciliationReport(from: string, to: string): Pr
           ON so.payment_tx_hash IS NOT NULL
           AND tx.transaction_hash IS NOT NULL
           AND LOWER(so.payment_tx_hash) = LOWER(tx.transaction_hash)
+        WHERE so.payment_status = 'paid'
         GROUP BY method_key
       )
       SELECT method_key, order_count, amount
@@ -1355,8 +1356,8 @@ export async function getDailyReconciliationReport(from: string, to: string): Pr
     sql`
       SELECT
         COUNT(*)::int AS total_orders,
-        COALESCE(SUM(subtotal), 0)::float AS gross_sales_amount,
-        COALESCE(SUM(discount_amount + coupon_discount_amount), 0)::float AS discount_amount,
+        COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN subtotal ELSE 0 END), 0)::float AS gross_sales_amount,
+        COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN discount_amount + coupon_discount_amount ELSE 0 END), 0)::float AS discount_amount,
         COALESCE(SUM(CASE WHEN payment_status = 'refunded' THEN total_amount ELSE 0 END), 0)::float AS refund_amount,
         COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END), 0)::float AS net_paid_amount
       FROM pos_orders
@@ -1365,8 +1366,8 @@ export async function getDailyReconciliationReport(from: string, to: string): Pr
     `,
     sql`
       SELECT
-        COALESCE(SUM(CASE WHEN customer_referral_id IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS member_orders,
-        COALESCE(SUM(CASE WHEN customer_referral_id IS NULL THEN 1 ELSE 0 END), 0)::int AS non_member_orders,
+        COALESCE(SUM(CASE WHEN customer_referral_id IS NOT NULL AND payment_status = 'paid' THEN 1 ELSE 0 END), 0)::int AS member_orders,
+        COALESCE(SUM(CASE WHEN customer_referral_id IS NULL AND payment_status = 'paid' THEN 1 ELSE 0 END), 0)::int AS non_member_orders,
         COALESCE(SUM(CASE WHEN coupon_id IS NOT NULL AND payment_status = 'paid' THEN 1 ELSE 0 END), 0)::int AS coupons_used,
         COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN coupon_discount_amount ELSE 0 END), 0)::float AS coupon_discount_total
       FROM pos_orders
