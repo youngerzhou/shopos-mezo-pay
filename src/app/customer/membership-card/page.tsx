@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Contract, BrowserProvider, MaxUint256, formatUnits } from 'ethers';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { RefreshCw, Info, ShieldCheck, AlertTriangle, Wallet } from 'lucide-react';
+import { RefreshCw, Info, ShieldCheck, AlertTriangle, Wallet, TicketPercent } from 'lucide-react';
 import { Toaster } from '@/components/ui/toaster';
 import { MUSD_ADDRESSES, SHOPOS_PULL_PAYMENT_CONTRACT } from '@/app/lib/mezo-config';
 import { validateTokenContract } from '@/app/lib/mezo-pull-payment';
@@ -23,8 +23,29 @@ type AllowanceState = {
     decimals: number;
 };
 
+type CustomerCoupon = {
+    id: string;
+    title: string;
+    discount_amount: number;
+    minimum_spend: number;
+    status: string;
+    source?: string;
+    expires_at: string;
+};
+
 function shortAddress(address?: string | null) {
     return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Not connected';
+}
+
+function formatCouponMoney(value: number) {
+    return Number(value || 0).toFixed(2);
+}
+
+function formatCouponDate(value?: string) {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function getEthereumProvider() {
@@ -43,6 +64,13 @@ function MembershipCardContent() {
     const [allowanceError, setAllowanceError] = useState<string | null>(null);
     const [approveLoading, setApproveLoading] = useState(false);
     const [approveHash, setApproveHash] = useState<string | null>(null);
+    const [coupons, setCoupons] = useState<CustomerCoupon[]>([]);
+    const [couponsLoading, setCouponsLoading] = useState(false);
+    const [couponsError, setCouponsError] = useState<string | null>(null);
+    const [claimLoading, setClaimLoading] = useState(false);
+    const [claimMessage, setClaimMessage] = useState<string | null>(null);
+    const [claimMessageTone, setClaimMessageTone] = useState<'success' | 'error'>('success');
+    const [newMemberClaimBlocked, setNewMemberClaimBlocked] = useState(false);
 
     const walletMatchesMember =
         !!walletAddress &&
@@ -51,6 +79,10 @@ function MembershipCardContent() {
     const allowanceAuthorized = !!allowance && allowance.raw > 0n;
     const dbAuthorized = !!(member?.fast_pay_authorized ?? member?.fast_pay_enabled);
     const staleAuthorization = dbAuthorized && !!allowance && allowance.raw === 0n;
+    const hasNewMemberCoupon = newMemberClaimBlocked || coupons.some((coupon) => (
+        coupon.source === 'NEW_MEMBER_SIGNUP' ||
+        coupon.title === 'New Member Welcome Coupon'
+    ));
 
     const refreshMember = async () => {
         if (!referralId) return null;
@@ -62,6 +94,78 @@ function MembershipCardContent() {
         }
         setMember(data);
         return data;
+    };
+
+    const fetchCoupons = async (customer = member) => {
+        const customerReferralId = customer?.referral_id || referralId;
+        const customerWallet = customer?.wallet_address;
+
+        if (!customerReferralId && !customerWallet) {
+            setCoupons([]);
+            return;
+        }
+
+        setCouponsLoading(true);
+        setCouponsError(null);
+        try {
+            const params = new URLSearchParams();
+            if (customerReferralId) params.set('referral_id', customerReferralId);
+            if (customerWallet) params.set('wallet', customerWallet);
+            const res = await fetch(`/api/customers/coupons?${params.toString()}`, { cache: 'no-store' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Unable to load coupons.');
+            const nextCoupons = Array.isArray(data.coupons) ? data.coupons : [];
+            setCoupons(nextCoupons);
+            if (nextCoupons.some((coupon: CustomerCoupon) => coupon.source === 'NEW_MEMBER_SIGNUP' || coupon.title === 'New Member Welcome Coupon')) {
+                setNewMemberClaimBlocked(true);
+            }
+        } catch (err: any) {
+            setCouponsError(err?.message || 'Unable to load coupons.');
+            setCoupons([]);
+        } finally {
+            setCouponsLoading(false);
+        }
+    };
+
+    const claimNewMemberCoupon = async () => {
+        if (!member?.referral_id && !member?.wallet_address) {
+            setClaimMessageTone('error');
+            setClaimMessage('Customer identity is missing.');
+            return;
+        }
+
+        setClaimLoading(true);
+        setClaimMessage(null);
+        setClaimMessageTone('success');
+        try {
+            const res = await fetch('/api/customers/coupons/claim-new-member', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    referral_id: member?.referral_id,
+                    wallet: member?.wallet_address
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                if (res.status === 409) {
+                    setNewMemberClaimBlocked(true);
+                    setClaimMessageTone('error');
+                    setClaimMessage(data.error || 'New Member Welcome Coupon has already been claimed.');
+                    return;
+                }
+                throw new Error(data.error || 'Unable to claim coupon.');
+            }
+            setNewMemberClaimBlocked(true);
+            setClaimMessageTone('success');
+            setClaimMessage('New Member Welcome Coupon claimed.');
+            await fetchCoupons(member);
+        } catch (err: any) {
+            setClaimMessageTone('error');
+            setClaimMessage(err?.message || 'Unable to claim coupon.');
+        } finally {
+            setClaimLoading(false);
+        }
     };
 
     const getTokenContract = async (withSigner = false) => {
@@ -227,7 +331,8 @@ function MembershipCardContent() {
         const fetchMember = async () => {
             setLoading(true);
             try {
-                await refreshMember();
+                const nextMember = await refreshMember();
+                await fetchCoupons(nextMember);
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'Unable to load membership details.');
             } finally {
@@ -381,6 +486,75 @@ function MembershipCardContent() {
                                             </Button>
                                         </div>
                                     </div>
+                                </div>
+
+                                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-6">
+                                    <div className="mb-4 flex items-center justify-between gap-3">
+                                        <div>
+                                            <p className="text-[10px] uppercase tracking-[0.32em] text-slate-400 font-black">Coupons</p>
+                                            <h2 className="mt-2 text-xl font-black text-slate-900">Available Coupons</h2>
+                                        </div>
+                                        <Badge>{coupons.length}</Badge>
+                                    </div>
+
+                                    {couponsLoading ? (
+                                        <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm font-black text-slate-500">
+                                            <RefreshCw className="mr-2 inline h-4 w-4 animate-spin" />
+                                            Loading coupons...
+                                        </div>
+                                    ) : coupons.length === 0 ? (
+                                        <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm font-bold text-slate-500">
+                                            No coupons available yet.
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {coupons.map((coupon) => (
+                                                <div key={coupon.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div>
+                                                            <p className="text-base font-black text-slate-900">{coupon.title}</p>
+                                                            <p className="mt-1 text-xs font-bold text-slate-500">
+                                                                Expires: {formatCouponDate(coupon.expires_at)}
+                                                            </p>
+                                                        </div>
+                                                        <Badge>{coupon.status}</Badge>
+                                                    </div>
+                                                    <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                                                        <div>
+                                                            <p className="text-[10px] uppercase tracking-[0.24em] text-slate-400 font-black">Discount</p>
+                                                            <p className="mt-1 font-black text-slate-900">{formatCouponMoney(coupon.discount_amount)} MUSD</p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-[10px] uppercase tracking-[0.24em] text-slate-400 font-black">Minimum Spend</p>
+                                                            <p className="mt-1 font-black text-slate-900">{formatCouponMoney(coupon.minimum_spend)} MUSD</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {couponsError ? (
+                                        <p className="mt-3 text-sm font-bold text-red-600">{couponsError}</p>
+                                    ) : null}
+
+                                    {claimMessage ? (
+                                        <p className={`mt-3 text-sm font-bold ${claimMessageTone === 'success' ? 'text-emerald-700' : 'text-red-600'}`}>{claimMessage}</p>
+                                    ) : null}
+
+                                    <Button
+                                        className="mt-4 h-12 w-full rounded-2xl font-black"
+                                        variant={hasNewMemberCoupon ? 'outline' : 'default'}
+                                        onClick={claimNewMemberCoupon}
+                                        disabled={hasNewMemberCoupon || claimLoading}
+                                    >
+                                        {claimLoading ? (
+                                            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                                        ) : (
+                                            <TicketPercent className="mr-2 h-4 w-4" />
+                                        )}
+                                        {hasNewMemberCoupon ? 'Claimed' : 'Claim New Member Coupon'}
+                                    </Button>
                                 </div>
                             </div>
                             {member?.referral_id ? (
