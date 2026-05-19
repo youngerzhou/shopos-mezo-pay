@@ -1192,18 +1192,21 @@ async function getPosOrderDetail(kind: 'id' | 'pickup_token', value: string) {
   const order = orders[0];
   const items = await sql`
     SELECT
-      id,
-      order_id,
-      product_id,
-      barcode,
-      product_name,
-      qty,
-      unit_price::float,
-      discount_amount::float,
-      line_total::float
-    FROM pos_order_items
-    WHERE order_id = ${order.id}
-    ORDER BY product_name ASC
+      poi.id,
+      poi.order_id,
+      poi.product_id,
+      poi.barcode,
+      poi.product_name,
+      poi.qty,
+      poi.unit_price::float,
+      poi.discount_amount::float,
+      poi.line_total::float,
+      p.image_url
+    FROM pos_order_items poi
+    LEFT JOIN products p
+      ON poi.product_id = p.id
+    WHERE poi.order_id = ${order.id}
+    ORDER BY poi.product_name ASC
   `;
 
   return {
@@ -1246,12 +1249,29 @@ export async function listCustomerSelfPickupOrders(limit = 100) {
       COALESCE(
         STRING_AGG(poi.product_name || ' x ' || poi.qty::text, ', ' ORDER BY poi.product_name),
         ''
-      ) AS items_summary
+      ) AS items_summary,
+      COALESCE(
+        JSON_AGG(
+          JSON_BUILD_OBJECT(
+            'id', poi.id,
+            'product_id', poi.product_id,
+            'product_name', poi.product_name,
+            'qty', poi.qty,
+            'unit_price', poi.unit_price::float,
+            'line_total', poi.line_total::float,
+            'image_url', p.image_url
+          )
+          ORDER BY poi.product_name
+        ) FILTER (WHERE poi.id IS NOT NULL),
+        '[]'::json
+      ) AS items
     FROM pos_orders po
     LEFT JOIN customers c
       ON po.customer_referral_id = c.referral_id
     LEFT JOIN pos_order_items poi
       ON po.id = poi.order_id
+    LEFT JOIN products p
+      ON poi.product_id = p.id
     WHERE po.source = 'customer_self_order'
     AND po.fulfillment_type = 'pickup'
     GROUP BY

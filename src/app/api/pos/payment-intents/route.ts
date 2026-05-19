@@ -30,7 +30,13 @@ export async function POST(req: NextRequest) {
       process.env.NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET?.trim() ||
       await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7')
     );
-    const intent = await createPaymentIntent({ amountUsd, amountMUSD, merchantWallet, orderId });
+    const metadata = {
+      source: body.source || 'pos_qr_payment',
+      cartItems: Array.isArray(body.cartItems) ? body.cartItems : [],
+      member: body.member || null,
+      salesperson: body.salesperson || null
+    };
+    const intent = await createPaymentIntent({ amountUsd, amountMUSD, merchantWallet, orderId, metadata });
     const paymentIntentIdBytes32 = toStableBytes32(intent.id);
     const orderIdBytes32 = toStableBytes32(intent.orderId);
     const qrParams = new URLSearchParams({

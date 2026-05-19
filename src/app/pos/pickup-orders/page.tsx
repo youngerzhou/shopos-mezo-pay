@@ -18,7 +18,33 @@ type PickupOrder = {
   created_at: string;
   customer_name: string;
   items_summary: string;
+  items?: PickupOrderItem[];
 };
+
+type PickupOrderItem = {
+  id?: string;
+  product_name?: string;
+  name?: string;
+  qty?: number;
+  quantity?: number;
+  unit_price?: number;
+  line_total?: number;
+  image_url?: string | null;
+  imageUrl?: string | null;
+  product_image?: string | null;
+  productImage?: string | null;
+};
+
+const FALLBACK_PRODUCT_IMAGE = `data:image/svg+xml,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+  <rect width="96" height="96" rx="12" fill="#f1f5f9"/>
+  <path d="M25 34h46v34H25z" fill="#cbd5e1"/>
+  <path d="M34 34c1.8-8 6.5-12 14-12s12.2 4 14 12" fill="none" stroke="#94a3b8" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="37" cy="47" r="3" fill="#64748b"/>
+  <circle cx="59" cy="47" r="3" fill="#64748b"/>
+  <path d="M37 58c6 4 16 4 22 0" fill="none" stroke="#64748b" stroke-width="4" stroke-linecap="round"/>
+</svg>
+`)}`;
 
 function money(value: number) {
   return `${Number(value || 0).toFixed(2)} MUSD`;
@@ -28,6 +54,18 @@ function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function getItemName(item: PickupOrderItem) {
+  return item.product_name || item.name || 'Product';
+}
+
+function getItemQty(item: PickupOrderItem) {
+  return Number(item.qty || item.quantity || 1);
+}
+
+function getItemImage(item: PickupOrderItem) {
+  return item.image_url || item.imageUrl || item.product_image || item.productImage || FALLBACK_PRODUCT_IMAGE;
 }
 
 export default function PickupOrdersPage() {
@@ -132,7 +170,9 @@ function OrderGroup({ title, orders, empty, tone }: { title: string; orders: Pic
                   <td className="border border-slate-200 px-2 py-2 font-bold">{order.payment_status}</td>
                   <td className="border border-slate-200 px-2 py-2 font-bold">{order.fulfillment_status}</td>
                   <td className="border border-slate-200 px-2 py-2 font-bold">{formatDate(order.created_at)}</td>
-                  <td className="max-w-[260px] truncate border border-slate-200 px-2 py-2 font-bold">{order.items_summary || '-'}</td>
+                  <td className="border border-slate-200 px-2 py-2">
+                    <ItemsPreview order={order} />
+                  </td>
                   <td className="border border-slate-200 px-2 py-2 text-right">
                     {order.fulfillment_status === 'completed' ? (
                       <span className="inline-flex items-center rounded-md bg-slate-100 px-3 py-2 text-xs font-black text-slate-500">Completed</span>
@@ -149,5 +189,36 @@ function OrderGroup({ title, orders, empty, tone }: { title: string; orders: Pic
         </div>
       )}
     </section>
+  );
+}
+
+function ItemsPreview({ order }: { order: PickupOrder }) {
+  const items = Array.isArray(order.items) ? order.items : [];
+  if (items.length === 0) {
+    return <span className="font-bold text-slate-600">{order.items_summary || '-'}</span>;
+  }
+
+  return (
+    <div className="flex max-w-[320px] flex-col gap-2">
+      {items.slice(0, 3).map((item, index) => (
+        <div key={item.id || `${getItemName(item)}-${index}`} className="flex min-w-0 items-center gap-2">
+          <img
+            src={getItemImage(item)}
+            alt={getItemName(item)}
+            className="h-10 w-10 shrink-0 rounded-md border border-slate-200 bg-slate-100 object-cover"
+            onError={(event) => {
+              event.currentTarget.src = FALLBACK_PRODUCT_IMAGE;
+            }}
+          />
+          <div className="min-w-0">
+            <p className="truncate text-xs font-black text-slate-900">{getItemName(item)}</p>
+            <p className="text-[11px] font-bold text-slate-500">Qty {getItemQty(item)}</p>
+          </div>
+        </div>
+      ))}
+      {items.length > 3 ? (
+        <p className="text-[11px] font-black text-slate-500">+{items.length - 3} more items</p>
+      ) : null}
+    </div>
   );
 }

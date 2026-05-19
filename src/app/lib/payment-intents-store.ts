@@ -129,6 +129,7 @@ export async function createPaymentIntent(input: {
   merchantWallet: string;
   orderId?: string;
   ttlMinutes?: number;
+  metadata?: unknown;
 }) {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + (input.ttlMinutes || 15) * 60 * 1000);
@@ -143,7 +144,8 @@ export async function createPaymentIntent(input: {
     status: 'pending',
     paymentFlow: 'musd_scan_to_pay',
     createdAt: now.toISOString(),
-    expiresAt: expiresAt.toISOString()
+    expiresAt: expiresAt.toISOString(),
+    rawEvent: input.metadata
   };
 
   await ensureDb();
@@ -151,7 +153,7 @@ export async function createPaymentIntent(input: {
   await sql`
     INSERT INTO payment_intents (
       id, order_id, amount_usd, amount_musd, token, network, merchant_wallet,
-      status, payment_flow, expires_at, created_at, updated_at
+      status, payment_flow, raw_event, expires_at, created_at, updated_at
     )
     VALUES (
       ${intent.id},
@@ -163,6 +165,7 @@ export async function createPaymentIntent(input: {
       ${intent.merchantWallet},
       ${intent.status},
       ${intent.paymentFlow},
+      ${JSON.stringify(input.metadata || null)}::jsonb,
       ${intent.expiresAt},
       ${intent.createdAt},
       ${intent.createdAt}
@@ -275,13 +278,22 @@ export async function markPaymentIntentConfirmed(intent: PaymentIntent, update: 
   blockNumber?: number;
   rawEvent?: unknown;
 }) {
+  const baseRawEvent = intent.rawEvent && typeof intent.rawEvent === 'object' && !Array.isArray(intent.rawEvent)
+    ? intent.rawEvent as Record<string, unknown>
+    : {};
+  const nextRawEvent = update.rawEvent === undefined
+    ? intent.rawEvent
+    : {
+        ...baseRawEvent,
+        blockchainEvent: update.rawEvent
+      };
   const nextIntent: PaymentIntent = {
     ...intent,
     status: 'confirmed',
     txHash: update.txHash,
     payerWallet: update.payerWallet,
     blockNumber: update.blockNumber,
-    rawEvent: update.rawEvent,
+    rawEvent: nextRawEvent,
     confirmedAt: new Date().toISOString()
   };
 
@@ -293,7 +305,7 @@ export async function markPaymentIntentConfirmed(intent: PaymentIntent, update: 
         tx_hash = ${update.txHash},
         payer_wallet = ${update.payerWallet || null},
         block_number = ${update.blockNumber || null},
-        raw_event = ${JSON.stringify(update.rawEvent || null)}::jsonb,
+        raw_event = ${JSON.stringify(nextRawEvent || null)}::jsonb,
         confirmed_at = ${nextIntent.confirmedAt},
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ${intent.id}

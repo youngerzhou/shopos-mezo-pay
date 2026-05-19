@@ -665,6 +665,13 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
             txHash: String(paymentTxHash)
           });
           router.replace(`/customer/order/${encodeURIComponent(orderId)}/pickup?${query.toString()}`);
+        } else if (!cancelled && data?.status === 'confirmed') {
+          const query = new URLSearchParams({
+            status: 'paid',
+            orderId,
+            txHash: String(paymentTxHash)
+          });
+          router.replace(`/customer/payment-success/${encodeURIComponent(paymentIntentId)}?${query.toString()}`);
         }
       } catch (err: any) {
         if (!cancelled) setError(err.message || 'Payment failed');

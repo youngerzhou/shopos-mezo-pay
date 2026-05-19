@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { BarChart3, TrendingUp, Users, ShoppingBag, ArrowLeft, RefreshCw, Layers, Globe } from 'lucide-react';
+import { BarChart3, TrendingUp, Users, ShoppingBag, ArrowLeft, RefreshCw, Layers, Globe, ReceiptText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -50,7 +50,15 @@ function AdminDashboardContent() {
             </Link>
             <h1 className="text-3xl font-black tracking-tighter">Global Treasury</h1>
           </div>
-          <Badge className="bg-primary text-primary-foreground px-4 py-1 rounded-full font-bold">ADMIN CONSOLE</Badge>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Link href="/pos/reconciliation">
+              <Button variant="outline" className="rounded-md font-black">
+                <ReceiptText className="mr-2 h-4 w-4" />
+                Daily Reconciliation / Daily Sales
+              </Button>
+            </Link>
+            <Badge className="bg-primary text-primary-foreground px-4 py-1 rounded-full font-bold">ADMIN CONSOLE</Badge>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
