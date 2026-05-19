@@ -54,6 +54,12 @@ type ReconciliationReport = {
     fastPayRewardCouponsIssued: number;
     newMembersRegisteredToday: number;
   };
+  sourceSummary: {
+    posOrders: number;
+    posAmount: number;
+    customerSelfOrders: number;
+    customerSelfOrderAmount: number;
+  };
   totals: {
     totalOrders: number;
     grossSalesAmount: number;
@@ -96,6 +102,12 @@ const emptyReport: ReconciliationReport = {
     couponDiscountTotal: 0,
     fastPayRewardCouponsIssued: 0,
     newMembersRegisteredToday: 0
+  },
+  sourceSummary: {
+    posOrders: 0,
+    posAmount: 0,
+    customerSelfOrders: 0,
+    customerSelfOrderAmount: 0
   },
   totals: {
     totalOrders: 0,
@@ -436,6 +448,10 @@ export default function DailyReconciliationReportPage() {
             <Metric label="Net Paid Amount" value={money(report.totals.netPaidAmount)} strong />
             <Metric label="Blockchain Payment Total" value={money(report.totals.blockchainPaymentTotal)} blockchain />
             <Metric label="MUSD Payment Count" value={report.totals.musdPaymentCount.toString()} blockchain />
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <Metric label="POS Direct Orders" value={`${report.sourceSummary.posOrders} / ${money(report.sourceSummary.posAmount)}`} />
+            <Metric label="Customer Self-Service Pickup Orders" value={`${report.sourceSummary.customerSelfOrders} / ${money(report.sourceSummary.customerSelfOrderAmount)}`} />
           </div>
         </ReportSection>
 

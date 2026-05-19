@@ -34,7 +34,10 @@ export const SCHEMA_DEFINITION = {
     wallet_address: "TEXT", // Removed UNIQUE NOT NULL to allow initial onboarding without wallet
     username: "TEXT", // Added for personalization
     contact_info: "TEXT", // Phone or Email
+    phone: "TEXT",
+    email: "TEXT",
     referral_id: "TEXT UNIQUE NOT NULL", // Unique string for referrals
+    welcome_token: "TEXT",
     referred_by_staff_id: "TEXT", // Added to track staff referrals
     level: "INTEGER DEFAULT 1",
     fast_pay_enabled: "BOOLEAN DEFAULT FALSE",
@@ -48,7 +51,8 @@ export const SCHEMA_DEFINITION = {
   },
   user_coupons: {
     id: "TEXT PRIMARY KEY",
-    customer_wallet: "TEXT NOT NULL",
+    customer_wallet: "TEXT",
+    customer_referral_id: "TEXT",
     coupon_type: "TEXT NOT NULL",
     title: "TEXT NOT NULL",
     discount_amount: "DECIMAL NOT NULL",
@@ -140,6 +144,13 @@ export const SCHEMA_DEFINITION = {
     coupon_discount_amount: "DECIMAL NOT NULL DEFAULT 0",
     total_amount: "DECIMAL NOT NULL DEFAULT 0",
     currency: "TEXT NOT NULL DEFAULT 'MUSD'",
+    source: "TEXT NOT NULL DEFAULT 'pos'",
+    fulfillment_type: "TEXT",
+    fulfillment_status: "TEXT",
+    pickup_token: "TEXT",
+    pickup_completed_at: "TIMESTAMP",
+    pickup_completed_by: "TEXT",
+    payment_method: "TEXT",
     payment_status: "TEXT NOT NULL DEFAULT 'pending'",
     payment_tx_hash: "TEXT",
     created_at: "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"

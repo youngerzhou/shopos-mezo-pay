@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { hexToString, isHex, keccak256, padHex, stringToHex, toBytes } from 'viem';
 import { roundMoney2 } from '@/app/lib/money';
-import { ensureDb, getSql } from '@/app/lib/db';
+import { ensureDb, getSql, markPosOrderPaid } from '@/app/lib/db';
 
 export type PaymentIntentStatus = 'pending' | 'detected' | 'confirmed' | 'expired' | 'failed';
 
@@ -127,13 +127,14 @@ export async function createPaymentIntent(input: {
   amountUsd: number;
   amountMUSD: number;
   merchantWallet: string;
+  orderId?: string;
   ttlMinutes?: number;
 }) {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + (input.ttlMinutes || 15) * 60 * 1000);
   const intent: PaymentIntent = {
     id: makeId('PI'),
-    orderId: makeId('ORD'),
+    orderId: input.orderId || makeId('ORD'),
     amountUsd: roundMoney2(input.amountUsd),
     amountMUSD: roundMoney2(input.amountMUSD),
     token: 'MUSD',
@@ -298,5 +299,14 @@ export async function markPaymentIntentConfirmed(intent: PaymentIntent, update: 
     WHERE id = ${intent.id}
   `;
   mirrorIntent(nextIntent);
+  try {
+    await markPosOrderPaid(intent.orderId, update.txHash);
+  } catch (error) {
+    console.warn('[PaymentIntentIdentity] POS order paid sync skipped', {
+      orderId: intent.orderId,
+      paymentIntentId: intent.id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
   return nextIntent;
 }

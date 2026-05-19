@@ -38,6 +38,11 @@ export interface CreatePosOrderPayload {
   couponId?: string | null;
   passportLevel?: 0 | 1 | 2 | 3;
   currency?: string;
+  source?: 'pos' | 'customer_self_order';
+  fulfillmentType?: 'pickup' | string | null;
+  fulfillmentStatus?: 'pending' | 'ready_for_pickup' | 'completed' | string | null;
+  paymentStatus?: 'pending' | 'unpaid' | 'paid' | string;
+  paymentMethod?: string | null;
   items: PosOrderItemInput[];
 }
 
@@ -57,6 +62,8 @@ export interface CustomerMembership {
   username: string | null;
   wallet_address?: string | null;
   wallet_address_display?: string | null;
+  fast_pay_enabled?: boolean;
+  fast_pay_allowance?: number | null;
   total_spent: number;
   level: number;
   level_code: string;
@@ -67,7 +74,8 @@ export interface CustomerMembership {
 
 export interface UserCoupon {
   id: string;
-  customer_wallet: string;
+  customer_wallet: string | null;
+  customer_referral_id?: string | null;
   coupon_type: 'threshold_discount' | 'cash_discount' | string;
   title: string;
   discount_amount: number;
@@ -450,6 +458,75 @@ export async function initDb() {
           
           console.log('[DB Init] Demo data seeded');
         }
+      },
+      {
+        id: '005_contact_email_and_referral_coupons',
+        description: 'Add email/phone registration fields and referral-bound coupons',
+        run: async () => {
+          console.log('[DB Init] Applying migration: 005_contact_email_and_referral_coupons');
+          await sql(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone TEXT`);
+          await sql(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS email TEXT`);
+          await sql(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS welcome_token TEXT`);
+          await sql(`ALTER TABLE user_coupons ADD COLUMN IF NOT EXISTS customer_referral_id TEXT`);
+          await sql(`ALTER TABLE user_coupons ALTER COLUMN customer_wallet DROP NOT NULL`);
+          await sql(`
+            UPDATE customers
+            SET email = LOWER(contact_info)
+            WHERE email IS NULL
+            AND contact_info IS NOT NULL
+            AND contact_info LIKE '%@%'
+          `);
+          await sql(`
+            UPDATE customers
+            SET phone = contact_info
+            WHERE phone IS NULL
+            AND contact_info IS NOT NULL
+            AND contact_info NOT LIKE '%@%'
+          `);
+          await sql(`
+            CREATE UNIQUE INDEX IF NOT EXISTS customers_phone_unique_idx
+            ON customers (LOWER(phone))
+            WHERE phone IS NOT NULL
+          `);
+          await sql(`
+            CREATE UNIQUE INDEX IF NOT EXISTS customers_email_unique_idx
+            ON customers (LOWER(email))
+            WHERE email IS NOT NULL
+          `);
+          await sql(`
+            CREATE UNIQUE INDEX IF NOT EXISTS customers_welcome_token_unique_idx
+            ON customers (welcome_token)
+            WHERE welcome_token IS NOT NULL
+          `);
+          await sql(`
+            CREATE UNIQUE INDEX IF NOT EXISTS user_coupons_referral_source_ref_idx
+            ON user_coupons (customer_referral_id, source, source_ref)
+            WHERE customer_referral_id IS NOT NULL
+          `);
+        }
+      },
+      {
+        id: '006_customer_self_order_pickup',
+        description: 'Add customer self-order pickup fields to POS orders',
+        run: async () => {
+          console.log('[DB Init] Applying migration: 006_customer_self_order_pickup');
+          await sql(`ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'pos'`);
+          await sql(`ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS fulfillment_type TEXT`);
+          await sql(`ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS fulfillment_status TEXT`);
+          await sql(`ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS pickup_token TEXT`);
+          await sql(`ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS pickup_completed_at TIMESTAMP`);
+          await sql(`ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS pickup_completed_by TEXT`);
+          await sql(`ALTER TABLE pos_orders ADD COLUMN IF NOT EXISTS payment_method TEXT`);
+          await sql(`
+            CREATE UNIQUE INDEX IF NOT EXISTS pos_orders_pickup_token_unique_idx
+            ON pos_orders (pickup_token)
+            WHERE pickup_token IS NOT NULL
+          `);
+          await sql(`
+            CREATE INDEX IF NOT EXISTS pos_orders_source_created_idx
+            ON pos_orders (source, created_at)
+          `);
+        }
       }
     ];
 
@@ -534,6 +611,8 @@ export async function getCustomerMembership(referralId: string): Promise<Custome
       referral_id,
       username,
       wallet_address,
+      fast_pay_enabled,
+      fast_pay_allowance::float,
       COALESCE(total_spent, 0)::float as total_spent,
       COALESCE(level, 1)::int as level
     FROM customers
@@ -560,6 +639,8 @@ export async function getCustomerMembership(referralId: string): Promise<Custome
     username: customer.username || null,
     wallet_address: walletAddress,
     wallet_address_display: walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : null,
+    fast_pay_enabled: Boolean(customer.fast_pay_enabled),
+    fast_pay_allowance: customer.fast_pay_allowance == null ? null : Number(customer.fast_pay_allowance),
     total_spent: roundMoney2(Number(customer.total_spent || 0)),
     level: Number(memberLevel.sort_order),
     level_code: memberLevel.level_code,
@@ -597,8 +678,39 @@ export async function getProductByBarcode(barcode: string) {
   return results[0];
 }
 
+export async function getActiveProducts(limit = 50) {
+  await ensureDb();
+  const sql = getSql();
+  const results = await sql`
+    SELECT
+      id,
+      barcode,
+      sku,
+      name,
+      category,
+      brand,
+      color,
+      size,
+      price::float,
+      currency,
+      stock_qty,
+      image_url,
+      is_active,
+      created_at
+    FROM products
+    WHERE is_active = TRUE
+    ORDER BY category NULLS LAST, name ASC
+    LIMIT ${limit}
+  `;
+  return results;
+}
+
 function normalizeWalletAddress(walletAddress: string) {
   return walletAddress.toLowerCase().trim();
+}
+
+function normalizeReferralId(referralId?: string | null) {
+  return referralId?.trim() || null;
 }
 
 function couponExpiry(days = 90) {
@@ -607,25 +719,27 @@ function couponExpiry(days = 90) {
   return expiresAt.toISOString();
 }
 
-export async function issueNewMemberCoupon(customerWallet?: string | null): Promise<UserCoupon | null> {
-  if (!customerWallet) return null;
+export async function issueNewMemberCoupon(customerWallet?: string | null, customerReferralId?: string | null): Promise<UserCoupon | null> {
+  if (!customerWallet && !customerReferralId) return null;
 
   await ensureDb();
   const sql = getSql();
-  const wallet = normalizeWalletAddress(customerWallet);
+  const wallet = customerWallet ? normalizeWalletAddress(customerWallet) : null;
+  const referralId = normalizeReferralId(customerReferralId);
+  const sourceRef = referralId || 'NEW_MEMBER_SIGNUP';
   const id = `cpn_new_${Math.random().toString(36).substring(2, 10)}`;
   const results = await sql`
     INSERT INTO user_coupons (
-      id, customer_wallet, coupon_type, title, discount_amount, minimum_spend,
+      id, customer_wallet, customer_referral_id, coupon_type, title, discount_amount, minimum_spend,
       status, source, source_ref, expires_at
     )
     VALUES (
-      ${id}, ${wallet}, 'threshold_discount', '新会员满100减5', 5, 100,
-      'unused', 'NEW_MEMBER_SIGNUP', 'NEW_MEMBER_SIGNUP', ${couponExpiry()}
+      ${id}, ${wallet}, ${referralId}, 'threshold_discount', 'New Member Welcome Coupon', 5, 100,
+      'unused', 'NEW_MEMBER_SIGNUP', ${sourceRef}, ${couponExpiry()}
     )
     ON CONFLICT DO NOTHING
     RETURNING
-      id, customer_wallet, coupon_type, title,
+      id, customer_wallet, customer_referral_id, coupon_type, title,
       discount_amount::float, minimum_spend::float,
       status, source, source_ref, created_at, expires_at
   `;
@@ -634,13 +748,16 @@ export async function issueNewMemberCoupon(customerWallet?: string | null): Prom
 
   const existing = await sql`
     SELECT
-      id, customer_wallet, coupon_type, title,
+      id, customer_wallet, customer_referral_id, coupon_type, title,
       discount_amount::float, minimum_spend::float,
       status, source, source_ref, created_at, expires_at
     FROM user_coupons
-    WHERE LOWER(customer_wallet) = ${wallet}
-    AND source = 'NEW_MEMBER_SIGNUP'
-    AND source_ref = 'NEW_MEMBER_SIGNUP'
+    WHERE source = 'NEW_MEMBER_SIGNUP'
+    AND source_ref = ${sourceRef}
+    AND (
+      (${wallet}::text IS NOT NULL AND LOWER(customer_wallet) = ${wallet})
+      OR (${referralId}::text IS NOT NULL AND customer_referral_id = ${referralId})
+    )
     LIMIT 1
   `;
   return (existing[0] as UserCoupon) || null;
@@ -665,16 +782,16 @@ export async function issueFastPayAuthorizationCoupon(
 
   const results = await sql`
     INSERT INTO user_coupons (
-      id, customer_wallet, coupon_type, title, discount_amount, minimum_spend,
+      id, customer_wallet, customer_referral_id, coupon_type, title, discount_amount, minimum_spend,
       status, source, source_ref, expires_at
     )
     VALUES (
-      ${id}, ${wallet}, 'cash_discount', 'Fast Pay 授权奖励券', ${discountAmount}, 0,
+      ${id}, ${wallet}, ${null}, 'cash_discount', 'Fast Pay Authorization Reward Coupon', ${discountAmount}, 0,
       'unused', 'FAST_PAY_AUTHORIZED', ${ref}, ${couponExpiry()}
     )
     ON CONFLICT DO NOTHING
     RETURNING
-      id, customer_wallet, coupon_type, title,
+      id, customer_wallet, customer_referral_id, coupon_type, title,
       discount_amount::float, minimum_spend::float,
       status, source, source_ref, created_at, expires_at
   `;
@@ -683,7 +800,7 @@ export async function issueFastPayAuthorizationCoupon(
 
   const existing = await sql`
     SELECT
-      id, customer_wallet, coupon_type, title,
+      id, customer_wallet, customer_referral_id, coupon_type, title,
       discount_amount::float, minimum_spend::float,
       status, source, source_ref, created_at, expires_at
     FROM user_coupons
@@ -695,35 +812,70 @@ export async function issueFastPayAuthorizationCoupon(
   return (existing[0] as UserCoupon) || null;
 }
 
-export async function getAvailableCoupons(customerWallet: string, orderAmount?: number): Promise<UserCoupon[]> {
+export async function getAvailableCoupons(customerWallet?: string | null, orderAmount?: number, customerReferralId?: string | null): Promise<UserCoupon[]> {
   await ensureDb();
   const sql = getSql();
-  const wallet = normalizeWalletAddress(customerWallet);
+  const wallet = customerWallet ? normalizeWalletAddress(customerWallet) : null;
+  const referralId = normalizeReferralId(customerReferralId);
   const amount = orderAmount == null ? null : roundMoney2(Number(orderAmount));
 
-  const results = await sql`
-    SELECT
-      id, customer_wallet, coupon_type, title,
-      discount_amount::float, minimum_spend::float,
-      status, source, source_ref, created_at, expires_at
-    FROM user_coupons
-    WHERE LOWER(customer_wallet) = ${wallet}
-    AND status = 'unused'
-    AND expires_at > CURRENT_TIMESTAMP
-    AND (${amount}::decimal IS NULL OR minimum_spend <= ${amount})
-    ORDER BY discount_amount DESC, created_at ASC
-  `;
+  if (!wallet && !referralId) {
+    return [];
+  }
+
+  let results;
+  if (wallet && referralId) {
+    results = await sql`
+      SELECT
+        id, customer_wallet, customer_referral_id, coupon_type, title,
+        discount_amount::float, minimum_spend::float,
+        status, source, source_ref, created_at, expires_at
+      FROM user_coupons
+      WHERE (LOWER(customer_wallet) = ${wallet} OR customer_referral_id = ${referralId})
+      AND status = 'unused'
+      AND expires_at > CURRENT_TIMESTAMP
+      AND (${amount}::decimal IS NULL OR minimum_spend <= ${amount})
+      ORDER BY discount_amount DESC, created_at ASC
+    `;
+  } else if (wallet) {
+    results = await sql`
+      SELECT
+        id, customer_wallet, customer_referral_id, coupon_type, title,
+        discount_amount::float, minimum_spend::float,
+        status, source, source_ref, created_at, expires_at
+      FROM user_coupons
+      WHERE LOWER(customer_wallet) = ${wallet}
+      AND status = 'unused'
+      AND expires_at > CURRENT_TIMESTAMP
+      AND (${amount}::decimal IS NULL OR minimum_spend <= ${amount})
+      ORDER BY discount_amount DESC, created_at ASC
+    `;
+  } else {
+    results = await sql`
+      SELECT
+        id, customer_wallet, customer_referral_id, coupon_type, title,
+        discount_amount::float, minimum_spend::float,
+        status, source, source_ref, created_at, expires_at
+      FROM user_coupons
+      WHERE customer_referral_id = ${referralId}
+      AND status = 'unused'
+      AND expires_at > CURRENT_TIMESTAMP
+      AND (${amount}::decimal IS NULL OR minimum_spend <= ${amount})
+      ORDER BY discount_amount DESC, created_at ASC
+    `;
+  }
   return results as UserCoupon[];
 }
 
-async function validateCouponForOrder(couponId: string, customerWallet: string, payableAmount: number) {
+async function validateCouponForOrder(couponId: string, customerWallet: string | null, payableAmount: number, customerReferralId?: string | null) {
   const sql = getSql();
-  const wallet = normalizeWalletAddress(customerWallet);
+  const wallet = customerWallet ? normalizeWalletAddress(customerWallet) : null;
+  const referralId = normalizeReferralId(customerReferralId);
   const amount = roundMoney2(payableAmount);
 
   const results = await sql`
     SELECT
-      id, customer_wallet, coupon_type, title,
+      id, customer_wallet, customer_referral_id, coupon_type, title,
       discount_amount::float, minimum_spend::float,
       status, source, source_ref, created_at, expires_at
     FROM user_coupons
@@ -733,7 +885,12 @@ async function validateCouponForOrder(couponId: string, customerWallet: string, 
 
   const coupon = results[0] as UserCoupon | undefined;
   if (!coupon) throw new Error('Coupon not found');
-  if (normalizeWalletAddress(coupon.customer_wallet) !== wallet) throw new Error('Coupon does not belong to this customer');
+  if (coupon.customer_wallet && (!wallet || normalizeWalletAddress(coupon.customer_wallet) !== wallet)) {
+    throw new Error('Coupon does not belong to this customer');
+  }
+  if (coupon.customer_referral_id && (!referralId || coupon.customer_referral_id !== referralId)) {
+    throw new Error('Coupon does not belong to this customer');
+  }
   if (coupon.status !== 'unused') throw new Error('Coupon is not available');
   if (new Date(coupon.expires_at).getTime() <= Date.now()) throw new Error('Coupon has expired');
   if (amount < Number(coupon.minimum_spend || 0)) throw new Error('Order amount does not meet coupon minimum spend');
@@ -762,6 +919,14 @@ export async function createPosOrder(payload: CreatePosOrderPayload) {
   const orderId = `pos_${Math.random().toString(36).substring(2, 10)}`;
   const orderNo = `POS-${Date.now().toString(36).toUpperCase()}`;
   const createdAt = new Date().toISOString();
+  const source = payload.source || 'pos';
+  const fulfillmentType = payload.fulfillmentType || (source === 'customer_self_order' ? 'pickup' : null);
+  const fulfillmentStatus = payload.fulfillmentStatus || (source === 'customer_self_order' ? 'pending' : null);
+  const pickupToken = source === 'customer_self_order'
+    ? `pku_${Math.random().toString(36).substring(2, 12)}${Date.now().toString(36)}`
+    : null;
+  const paymentStatus = payload.paymentStatus || 'pending';
+  const paymentMethod = payload.paymentMethod || null;
 
   let subtotal = 0;
   let discountAmount = 0;
@@ -801,11 +966,11 @@ export async function createPosOrder(payload: CreatePosOrderPayload) {
   let couponDiscountAmount = 0;
 
   if (couponId) {
-    if (!normalizedWallet) {
-      throw new Error('Customer wallet is required to use coupon');
+    if (!normalizedWallet && !customerReferralId) {
+      throw new Error('Customer identity is required to use coupon');
     }
 
-    const coupon = await validateCouponForOrder(couponId, normalizedWallet, roundMoney2(subtotal - discountAmount));
+    const coupon = await validateCouponForOrder(couponId, normalizedWallet, roundMoney2(subtotal - discountAmount), customerReferralId);
     couponDiscountAmount = roundMoney2(Math.min(Number(coupon.discount_amount || 0), roundMoney2(subtotal - discountAmount)));
   }
 
@@ -815,7 +980,8 @@ export async function createPosOrder(payload: CreatePosOrderPayload) {
     INSERT INTO pos_orders (
       id, order_no, shop_id, customer_referral_id, customer_wallet, passport_level,
       member_level_code, member_level_name, member_discount_rate,
-      subtotal, discount_amount, coupon_id, coupon_discount_amount, total_amount, currency, payment_status
+      subtotal, discount_amount, coupon_id, coupon_discount_amount, total_amount, currency,
+      source, fulfillment_type, fulfillment_status, pickup_token, payment_method, payment_status
     )
     VALUES (
       ${orderId},
@@ -833,7 +999,12 @@ export async function createPosOrder(payload: CreatePosOrderPayload) {
       ${couponDiscountAmount},
       ${totalAmount},
       ${currency},
-      'pending'
+      ${source},
+      ${fulfillmentType},
+      ${fulfillmentStatus},
+      ${pickupToken},
+      ${paymentMethod},
+      ${paymentStatus}
     )
   `;
 
@@ -873,7 +1044,13 @@ export async function createPosOrder(payload: CreatePosOrderPayload) {
     member_level_name: membership?.level_name || null,
     member_discount_rate: discountRate,
     coupon_id: couponId,
-    coupon_discount_amount: couponDiscountAmount
+    coupon_discount_amount: couponDiscountAmount,
+    source,
+    fulfillment_type: fulfillmentType,
+    fulfillment_status: fulfillmentStatus,
+    pickup_token: pickupToken,
+    payment_method: paymentMethod,
+    payment_status: paymentStatus
   };
 }
 
@@ -884,7 +1061,12 @@ export async function markPosOrderPaid(orderId: string, txHash: string) {
   const updated = await sql`
     UPDATE pos_orders
     SET payment_status = 'paid',
-        payment_tx_hash = ${txHash}
+        payment_tx_hash = ${txHash},
+        payment_method = COALESCE(payment_method, 'musd_wallet'),
+        fulfillment_status = CASE
+          WHEN source = 'customer_self_order' AND fulfillment_type = 'pickup' THEN 'ready_for_pickup'
+          ELSE fulfillment_status
+        END
     WHERE id = ${orderId}
     AND payment_status <> 'paid'
     RETURNING
@@ -975,6 +1157,108 @@ export async function markPosOrderPaid(orderId: string, txHash: string) {
   return {
     ...order,
     membership
+  };
+}
+
+async function getPosOrderDetail(kind: 'id' | 'pickup_token', value: string) {
+  await ensureDb();
+  const sql = getSql();
+  const selectOrder = kind === 'id'
+    ? sql`
+      SELECT
+        id, order_no, shop_id, customer_referral_id, customer_wallet,
+        subtotal::float, discount_amount::float, coupon_id, coupon_discount_amount::float,
+        total_amount::float, currency, source, fulfillment_type, fulfillment_status,
+        pickup_token, pickup_completed_at, pickup_completed_by, payment_method,
+        payment_status, payment_tx_hash, created_at
+      FROM pos_orders
+      WHERE id = ${value}
+      LIMIT 1
+    `
+    : sql`
+      SELECT
+        id, order_no, shop_id, customer_referral_id, customer_wallet,
+        subtotal::float, discount_amount::float, coupon_id, coupon_discount_amount::float,
+        total_amount::float, currency, source, fulfillment_type, fulfillment_status,
+        pickup_token, pickup_completed_at, pickup_completed_by, payment_method,
+        payment_status, payment_tx_hash, created_at
+      FROM pos_orders
+      WHERE pickup_token = ${value}
+      LIMIT 1
+    `;
+  const orders = await selectOrder;
+
+  if (orders.length === 0) return null;
+  const order = orders[0];
+  const items = await sql`
+    SELECT
+      id,
+      order_id,
+      product_id,
+      barcode,
+      product_name,
+      qty,
+      unit_price::float,
+      discount_amount::float,
+      line_total::float
+    FROM pos_order_items
+    WHERE order_id = ${order.id}
+    ORDER BY product_name ASC
+  `;
+
+  return {
+    ...order,
+    items,
+    membership: order.customer_referral_id ? await getCustomerMembership(order.customer_referral_id) : null
+  };
+}
+
+export async function getPosOrderById(orderId: string) {
+  return getPosOrderDetail('id', orderId);
+}
+
+export async function getPosOrderByPickupToken(token: string) {
+  return getPosOrderDetail('pickup_token', token);
+}
+
+export async function completePickupOrder(orderId: string, completedBy?: string | null) {
+  await ensureDb();
+  const sql = getSql();
+  const rows = await sql`
+    UPDATE pos_orders
+    SET fulfillment_status = 'completed',
+        pickup_completed_at = CURRENT_TIMESTAMP,
+        pickup_completed_by = ${completedBy || null}
+    WHERE id = ${orderId}
+    AND source = 'customer_self_order'
+    AND fulfillment_type = 'pickup'
+    AND payment_status = 'paid'
+    AND fulfillment_status <> 'completed'
+    RETURNING id
+  `;
+  if (rows.length === 0) {
+    const existing = await getPosOrderById(orderId);
+    if (!existing) throw new Error('Order not found');
+    if (existing.fulfillment_status === 'completed') throw new Error('Order already completed');
+    if (existing.payment_status !== 'paid') throw new Error('Payment required before pickup');
+    throw new Error('Unable to complete pickup');
+  }
+  return getPosOrderById(orderId);
+}
+
+export async function markCounterPaymentReceived(orderId: string, method = 'counter') {
+  await ensureDb();
+  const sql = getSql();
+  const counterRef = `counter_${Date.now().toString(36)}`;
+  const paid = await markPosOrderPaid(orderId, counterRef);
+  await sql`
+    UPDATE pos_orders
+    SET payment_method = ${method}
+    WHERE id = ${orderId}
+  `;
+  return {
+    ...paid,
+    ...(await getPosOrderById(orderId))
   };
 }
 
@@ -1074,8 +1358,8 @@ export async function createCustomer(referral_id: string, level: number = 1, ref
       wallet_address = COALESCE(customers.wallet_address, EXCLUDED.wallet_address)
     RETURNING *
   `;
-  if (results[0]?.wallet_address) {
-    await issueNewMemberCoupon(results[0].wallet_address);
+  if (results[0]) {
+    await issueNewMemberCoupon(results[0].wallet_address, results[0].referral_id);
   }
   return results[0];
 }
@@ -1091,8 +1375,8 @@ export async function bindWalletToCustomer(referral_id: string, wallet_address: 
     WHERE referral_id = ${referral_id} AND wallet_address IS NULL
     RETURNING *
   `;
-  if (results[0]?.wallet_address) {
-    await issueNewMemberCoupon(results[0].wallet_address);
+  if (results[0]) {
+    await issueNewMemberCoupon(results[0].wallet_address, results[0].referral_id);
   }
   return results[0];
 }
@@ -1340,6 +1624,12 @@ export interface ReconciliationReport {
     fastPayRewardCouponsIssued: number;
     newMembersRegisteredToday: number;
   };
+  sourceSummary: {
+    posOrders: number;
+    posAmount: number;
+    customerSelfOrders: number;
+    customerSelfOrderAmount: number;
+  };
   totals: {
     totalOrders: number;
     grossSalesAmount: number;
@@ -1416,6 +1706,7 @@ export async function getDailyReconciliationReport(from: string, to: string): Pr
     membershipRows,
     couponIssueRows,
     customerRows,
+    sourceRows,
     blockchainRows,
     transactionRows
   ] = await Promise.all([
@@ -1429,6 +1720,15 @@ export async function getDailyReconciliationReport(from: string, to: string): Pr
       classified_orders AS (
         SELECT
           CASE
+            WHEN so.payment_status = 'paid'
+              AND so.payment_method IN ('cash', 'counter')
+              THEN 'cash'
+            WHEN so.payment_status = 'paid'
+              AND so.payment_method = 'card'
+              THEN 'card'
+            WHEN so.payment_status = 'paid'
+              AND so.payment_method IN ('stored_value', 'member_balance')
+              THEN 'stored_value'
             WHEN so.payment_status = 'paid'
               AND tx.transaction_hash IS NOT NULL
               AND tx.status = 'success'
@@ -1499,6 +1799,16 @@ export async function getDailyReconciliationReport(from: string, to: string): Pr
     sql`
       SELECT COUNT(*)::int AS new_members_registered_today
       FROM customers
+      WHERE created_at >= ${fromIso}::timestamp
+      AND created_at <= ${toIso}::timestamp
+    `,
+    sql`
+      SELECT
+        COALESCE(SUM(CASE WHEN source = 'customer_self_order' THEN 1 ELSE 0 END), 0)::int AS customer_self_orders,
+        COALESCE(SUM(CASE WHEN source = 'customer_self_order' AND payment_status = 'paid' THEN total_amount ELSE 0 END), 0)::float AS customer_self_order_amount,
+        COALESCE(SUM(CASE WHEN source IS NULL OR source = 'pos' THEN 1 ELSE 0 END), 0)::int AS pos_orders,
+        COALESCE(SUM(CASE WHEN (source IS NULL OR source = 'pos') AND payment_status = 'paid' THEN total_amount ELSE 0 END), 0)::float AS pos_amount
+      FROM pos_orders
       WHERE created_at >= ${fromIso}::timestamp
       AND created_at <= ${toIso}::timestamp
     `,
@@ -1623,6 +1933,7 @@ export async function getDailyReconciliationReport(from: string, to: string): Pr
   const membershipRow = (membershipRows as any[])[0] || {};
   const couponIssueRow = (couponIssueRows as any[])[0] || {};
   const customerRow = (customerRows as any[])[0] || {};
+  const sourceRow = (sourceRows as any[])[0] || {};
 
   return {
     storeName: 'Mezo',
@@ -1651,6 +1962,12 @@ export async function getDailyReconciliationReport(from: string, to: string): Pr
       couponDiscountTotal: roundMoney2(Number(membershipRow.coupon_discount_total || 0)),
       fastPayRewardCouponsIssued: Number(couponIssueRow.fast_pay_reward_coupons_issued || 0),
       newMembersRegisteredToday: Number(customerRow.new_members_registered_today || 0)
+    },
+    sourceSummary: {
+      posOrders: Number(sourceRow.pos_orders || 0),
+      posAmount: roundMoney2(Number(sourceRow.pos_amount || 0)),
+      customerSelfOrders: Number(sourceRow.customer_self_orders || 0),
+      customerSelfOrderAmount: roundMoney2(Number(sourceRow.customer_self_order_amount || 0))
     },
     totals: {
       totalOrders: Number(totalsRow.total_orders || 0),

@@ -16,6 +16,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const amountUsd = roundMoney2(Number(body.amountUsd));
     const amountMUSD = roundMoney2(Number(body.amountMUSD));
+    const orderId = typeof body.orderId === 'string' && body.orderId.trim() ? body.orderId.trim() : undefined;
 
     if (!Number.isFinite(amountUsd) || amountUsd <= 0) {
       return NextResponse.json({ error: 'amountUsd must be greater than 0' }, { status: 400 });
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
       process.env.NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET?.trim() ||
       await getSetting('Merchant_Wallet_Address', '0x92a3c1adc73f79818a09c6494a7bd28da9ea98e7')
     );
-    const intent = await createPaymentIntent({ amountUsd, amountMUSD, merchantWallet });
+    const intent = await createPaymentIntent({ amountUsd, amountMUSD, merchantWallet, orderId });
     const paymentIntentIdBytes32 = toStableBytes32(intent.id);
     const orderIdBytes32 = toStableBytes32(intent.orderId);
     const qrParams = new URLSearchParams({

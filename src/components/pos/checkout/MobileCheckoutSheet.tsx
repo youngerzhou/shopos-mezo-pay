@@ -86,7 +86,7 @@ export function MobileCheckoutSheet({
   const availableCouponCount = member ? coupons.filter((coupon) => afterOrderDiscount >= coupon.minSubtotal).length : 0;
 
   useEffect(() => {
-    if (!member?.walletAddress) {
+    if (!member?.walletAddress && !member?.referral_id) {
       setCoupons([]);
       setSelectedCoupon(null);
       return;
@@ -97,9 +97,10 @@ export function MobileCheckoutSheet({
       setCouponsLoading(true);
       try {
         const params = new URLSearchParams({
-          wallet: String(member?.walletAddress || ''),
           amount: String(afterOrderDiscount)
         });
+        if (member?.walletAddress) params.set('wallet', String(member.walletAddress));
+        if (member?.referral_id) params.set('referral_id', member.referral_id);
         const res = await fetch(`/api/customers/coupons?${params.toString()}`, {
           cache: 'no-store',
           signal: controller.signal
@@ -130,7 +131,7 @@ export function MobileCheckoutSheet({
 
     fetchCoupons();
     return () => controller.abort();
-  }, [member?.walletAddress, afterOrderDiscount]);
+  }, [member?.walletAddress, member?.referral_id, afterOrderDiscount]);
 
   const couponLabel = !member
     ? 'Guest has no coupons'

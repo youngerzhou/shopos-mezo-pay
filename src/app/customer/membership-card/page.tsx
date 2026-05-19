@@ -304,7 +304,7 @@ function MembershipCardContent() {
                                 <div className="rounded-3xl border border-slate-200 bg-slate-50 p-6">
                                     <div className="flex justify-between items-center mb-4">
                                         <p className="text-[10px] uppercase tracking-[0.32em] text-slate-400 font-black">Fast Pay Authorization</p>
-                                        <Badge>{allowanceAuthorized ? 'Fast Pay 已授权' : 'Disabled'}</Badge>
+                                        <Badge>{allowanceAuthorized ? 'Fast Pay Authorized' : 'Disabled'}</Badge>
                                     </div>
                                     <div className="space-y-5">
                                         <div>
@@ -325,7 +325,7 @@ function MembershipCardContent() {
                                         {staleAuthorization && (
                                             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-800 flex gap-3">
                                                 <AlertTriangle className="w-5 h-5 shrink-0" />
-                                                <p className="text-sm font-bold">Fast Pay 授权已失效或不是当前合约，请重新授权</p>
+                                                <p className="text-sm font-bold">Fast Pay authorization is stale or points to a previous contract. Please re-authorize.</p>
                                             </div>
                                         )}
 
@@ -338,7 +338,7 @@ function MembershipCardContent() {
 
                                         {allowanceAuthorized && (
                                             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-800">
-                                                <p className="text-sm font-bold">Fast Pay 已授权</p>
+                                                <p className="text-sm font-bold">Fast Pay Authorized</p>
                                             </div>
                                         )}
 
@@ -377,12 +377,20 @@ function MembershipCardContent() {
                                                 ) : (
                                                     <ShieldCheck className="mr-2 h-4 w-4" />
                                                 )}
-                                                重新授权 Fast Pay
+                                                Re-authorize Fast Pay
                                             </Button>
                                         </div>
                                     </div>
                                 </div>
                             </div>
+                            {member?.referral_id ? (
+                                <Button
+                                    className="h-14 w-full rounded-2xl font-black"
+                                    onClick={() => window.location.href = `/customer/shop?referral_id=${encodeURIComponent(member.referral_id)}`}
+                                >
+                                    Start Shopping / Shop Now
+                                </Button>
+                            ) : null}
                         </div>
                     )}
                 </div>

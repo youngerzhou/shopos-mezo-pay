@@ -19,11 +19,11 @@ export async function GET(req: NextRequest) {
       customerWallet = customer?.wallet_address || null;
     }
 
-    if (!customerWallet) {
-      return NextResponse.json({ error: 'Missing customer wallet' }, { status: 400 });
+    if (!customerWallet && !referralId) {
+      return NextResponse.json({ error: 'Missing customer identity' }, { status: 400 });
     }
 
-    const coupons = await getAvailableCoupons(customerWallet, amount);
+    const coupons = await getAvailableCoupons(customerWallet, amount, referralId);
     return NextResponse.json({ coupons });
   } catch (error: any) {
     console.error('API GET /api/customers/coupons Error:', error);

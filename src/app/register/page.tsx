@@ -45,6 +45,16 @@ const ALLOWANCE_TIERS = [
   { amount: 1000, label: '$1000+', discount: '10%' },
 ] as const;
 
+type ContactType = 'phone' | 'email';
+
+function isEmailContact(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function detectContactType(value: string): ContactType {
+  return value.includes('@') && isEmailContact(value) ? 'email' : 'phone';
+}
+
 export default function RegisterPage() {
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
@@ -465,9 +475,14 @@ function RegisterContent() {
 
   const lookupExistingMember = async (contact: string) => {
     if (!contact) return false;
+    const contactType = detectContactType(contact);
     setLookingUp(true);
     try {
-      const res = await fetch(`/api/register?lookup=${encodeURIComponent(contact)}`);
+      const params = new URLSearchParams({
+        lookup: contact,
+        contactType
+      });
+      const res = await fetch(`/api/register?${params.toString()}`);
       const data = await res.json();
       if (res.ok && data && data.referral_id) {
         setNewMember(data);
@@ -497,6 +512,7 @@ function RegisterContent() {
     setLoading(true);
     try {
       const lookupContact = formData.contact.trim();
+      const contactType = detectContactType(lookupContact);
       const alreadyMember = await lookupExistingMember(lookupContact);
       if (alreadyMember) {
         return;
@@ -508,6 +524,7 @@ function RegisterContent() {
         body: JSON.stringify({
           username: formData.username.trim(),
           contact: lookupContact,
+          contactType,
           staff_id: staffPromoId
         })
       });
@@ -576,16 +593,16 @@ function RegisterContent() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Contact Info</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Phone or Email</label>
                     <Input
-                      placeholder="e.g. +1 234 567 890"
+                      placeholder="Enter phone number or email"
                       className="h-14 rounded-2xl pl-6 border-slate-200 focus:ring-primary/20"
                       value={formData.contact}
                       onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
                       onBlur={() => lookupExistingMember(formData.contact.trim())}
                     />
                     {lookingUp && (
-                      <p className="text-xs text-slate-500 mt-1">Checking existing membership for this phone number...</p>
+                      <p className="text-xs text-slate-500 mt-1">Checking existing membership for this contact...</p>
                     )}
                   </div>
 
@@ -635,13 +652,21 @@ function RegisterContent() {
               )}
 
               {newMember?.referral_id && (
-                <Button
-                  variant="outline"
-                  className="w-full h-16 rounded-2xl font-black gap-2 text-primary border-primary/20 bg-primary/5"
-                  onClick={() => window.location.href = `/customer/membership-card?referral_id=${newMember.referral_id}`}
-                >
-                  View Membership Card
-                </Button>
+                <div className="grid gap-2">
+                  <Button
+                    variant="outline"
+                    className="w-full h-16 rounded-2xl font-black gap-2 text-primary border-primary/20 bg-primary/5"
+                    onClick={() => window.location.href = `/customer/membership-card?referral_id=${newMember.referral_id}`}
+                  >
+                    View Membership Card
+                  </Button>
+                  <Button
+                    className="w-full h-16 rounded-2xl font-black gap-2"
+                    onClick={() => window.location.href = `/customer/shop?referral_id=${encodeURIComponent(newMember.referral_id)}`}
+                  >
+                    Start Shopping / Shop Now
+                  </Button>
+                </div>
               )}
 
               <div className="space-y-4">

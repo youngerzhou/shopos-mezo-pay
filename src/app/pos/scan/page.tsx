@@ -223,8 +223,8 @@ export default function ShoposHome() {
     setMemberId(data.referral_id);
     setMembership({
       ...data,
-      walletAddress: data.wallet_address || '0x84edc7907f22e6108c3fed0f4be7633bd26aa134',
-      musdAllowance: 107
+      walletAddress: data.wallet_address || null,
+      musdAllowance: data.fast_pay_enabled ? Number(data.fast_pay_allowance || 0) : 0
     });
     if (data.wallet_address && WALLET_RE.test(data.wallet_address)) {
       setWalletAddress(data.wallet_address.toLowerCase());
