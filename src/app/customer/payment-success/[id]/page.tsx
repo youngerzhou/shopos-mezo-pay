@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Loader2, ReceiptText, Wallet } from 'lucide-react';
+import { CheckCircle2, Loader2, ReceiptText, TicketPercent, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 type ReceiptItem = {
@@ -136,6 +136,13 @@ export default function CustomerPaymentSuccessPage() {
   }, [intent]);
   const member = intent?.rawEvent?.member;
   const displayTxHash = txHash || intent?.txHash || '';
+  const memberReferralId = member?.referralId || member?.referral_id || '';
+  const nextCouponHref = memberReferralId
+    ? `/customer/coupon-claim/next-purchase-reward?referral_id=${encodeURIComponent(memberReferralId)}`
+    : '/customer/coupon-claim/next-purchase-reward';
+  const backToStoreHref = memberReferralId
+    ? `/customer/shop?referral_id=${encodeURIComponent(memberReferralId)}`
+    : '/customer/shop';
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-950">
@@ -221,7 +228,24 @@ export default function CustomerPaymentSuccessPage() {
               </div>
             </section>
 
-            <Link href="/customer/shop">
+            <section className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-orange-700">
+                  <TicketPercent className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-black text-orange-950">Claim Your Next Coupon</p>
+                  <p className="mt-1 text-xs font-bold text-orange-800">Save 3.00 MUSD on your next order over 50.00 MUSD.</p>
+                </div>
+              </div>
+              <Link href={nextCouponHref}>
+                <Button className="mt-3 h-11 w-full rounded-md bg-orange-600 font-black text-white hover:bg-orange-700">
+                  Claim Coupon
+                </Button>
+              </Link>
+            </section>
+
+            <Link href={backToStoreHref}>
               <Button className="w-full rounded-md font-black">Back to Store</Button>
             </Link>
           </div>

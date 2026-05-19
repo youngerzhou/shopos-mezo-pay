@@ -9,7 +9,8 @@ import {
   Trash2, 
   Edit2, 
   ArrowLeft, 
-  QrCode, 
+  QrCode,
+  RefreshCw,
   Store, 
   ShieldCheck,
   Percent,
@@ -18,7 +19,8 @@ import {
   Printer,
   Wallet,
   PackageCheck,
-  ReceiptText
+  ReceiptText,
+  TicketPercent
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -44,6 +46,23 @@ import { Toaster } from '@/components/ui/toaster';
 import Link from 'next/link';
 import { QRCodeCanvas } from 'qrcode.react';
 
+const COUPON_CAMPAIGNS = [
+  {
+    id: 'new-member-welcome',
+    title: 'New Member Welcome Coupon',
+    discountAmount: 5,
+    minimumSpend: 100,
+    description: 'Give new members 5 MUSD off orders over 100 MUSD.'
+  },
+  {
+    id: 'next-purchase-reward',
+    title: 'Next Purchase Coupon',
+    discountAmount: 3,
+    minimumSpend: 50,
+    description: 'A simple return-visit coupon for customers after payment.'
+  }
+];
+
 export default function PosAdmin() {
   return (
     <Suspense fallback={<div className="p-8 text-center text-muted-foreground">Loading Control Center...</div>}>
@@ -54,7 +73,7 @@ export default function PosAdmin() {
 
 function PosAdminContent() {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<'settings' | 'staff'>('settings');
+  const [activeTab, setActiveTab] = useState<'settings' | 'staff' | 'coupons'>('settings');
   
   // Settings State
   const [settings, setSettings] = useState<any>({
@@ -76,10 +95,14 @@ function PosAdminContent() {
 
   // QR Badge State
   const [badgeStaff, setBadgeStaff] = useState<any>(null);
+  const [couponStats, setCouponStats] = useState<Record<string, { claimedCount: number; usedCount: number }>>({});
+  const [couponQr, setCouponQr] = useState<any>(null);
+  const [couponQrUrl, setCouponQrUrl] = useState('');
 
   useEffect(() => {
     fetchSettings();
     fetchStaff();
+    fetchCouponStats();
   }, []);
 
   const fetchSettings = async () => {
@@ -158,6 +181,25 @@ function PosAdminContent() {
     }
   };
 
+  const fetchCouponStats = async () => {
+    try {
+      const entries = await Promise.all(COUPON_CAMPAIGNS.map(async (campaign) => {
+        const res = await fetch(`/api/customers/coupons/campaign/${encodeURIComponent(campaign.id)}`, { cache: 'no-store' });
+        const data = await res.json();
+        return [campaign.id, data.stats || { claimedCount: 0, usedCount: 0 }] as const;
+      }));
+      setCouponStats(Object.fromEntries(entries));
+    } catch (err) {
+      console.error('Failed to load coupon stats:', err);
+    }
+  };
+
+  const showCouponQr = (campaign: any) => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://shopos-mezo-pay.vercel.app';
+    setCouponQr(campaign);
+    setCouponQrUrl(`${origin}/customer/coupon-claim/${encodeURIComponent(campaign.id)}`);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
       {/* Header */}
@@ -216,6 +258,17 @@ function PosAdminContent() {
             <Users className="w-4 h-4 inline mr-2" />
             Staff Roster
           </button>
+          <button
+            onClick={() => setActiveTab('coupons')}
+            className={`px-6 py-3 text-sm font-black uppercase tracking-widest transition-colors ${
+              activeTab === 'coupons'
+                ? 'border-b-2 border-primary text-primary'
+                : 'text-muted-foreground hover:text-primary'
+            }`}
+          >
+            <TicketPercent className="w-4 h-4 inline mr-2" />
+            Coupons
+          </button>
         </div>
 
         {activeTab === 'settings' ? (
@@ -250,6 +303,66 @@ function PosAdminContent() {
                </Card>
              ))}
            </div>
+        ) : activeTab === 'coupons' ? (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="space-y-1">
+              <h1 className="text-4xl font-black tracking-tight text-primary">Coupon Distribution</h1>
+              <p className="text-muted-foreground font-medium">Generate QR codes for customers to claim simple repeat-purchase coupons.</p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              {COUPON_CAMPAIGNS.map((campaign) => {
+                const stats = couponStats[campaign.id] || { claimedCount: 0, usedCount: 0 };
+                return (
+                  <Card key={campaign.id} className="border-none shadow-sm">
+                    <CardHeader className="pb-3 border-b border-slate-50">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-3 text-primary">
+                          <TicketPercent className="mt-1 h-5 w-5" />
+                          <div>
+                            <CardTitle className="text-base">{campaign.title}</CardTitle>
+                            <CardDescription className="text-xs">{campaign.description}</CardDescription>
+                          </div>
+                        </div>
+                        <Badge>{campaign.id}</Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4 pt-4">
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div className="rounded-xl bg-slate-50 p-3">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Discount</p>
+                          <p className="mt-1 text-lg font-black">{campaign.discountAmount.toFixed(2)} MUSD</p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 p-3">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Minimum Spend</p>
+                          <p className="mt-1 text-lg font-black">{campaign.minimumSpend.toFixed(2)} MUSD</p>
+                        </div>
+                        <div className="rounded-xl bg-emerald-50 p-3">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Claimed</p>
+                          <p className="mt-1 text-lg font-black text-emerald-950">{stats.claimedCount}</p>
+                        </div>
+                        <div className="rounded-xl bg-orange-50 p-3">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-orange-700">Used</p>
+                          <p className="mt-1 text-lg font-black text-orange-950">{stats.usedCount}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <Button className="flex-1 rounded-xl font-black" onClick={() => showCouponQr(campaign)}>
+                          <QrCode className="mr-2 h-4 w-4" />
+                          Issue
+                        </Button>
+                        <Button variant="outline" className="rounded-xl font-black" onClick={fetchCouponStats}>
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Refresh
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
         ) : (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="flex justify-between items-end">
@@ -429,6 +542,38 @@ function PosAdminContent() {
                 Print Badge
               </Button>
            </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Coupon QR Modal */}
+      <Dialog open={!!couponQr} onOpenChange={() => setCouponQr(null)}>
+        <DialogContent className="max-w-sm rounded-[3rem] p-0 overflow-hidden border-none shadow-2xl">
+          <div className="bg-orange-600 p-10 text-center text-white space-y-6 flex flex-col items-center">
+            <div className="space-y-2">
+              <Badge className="bg-white text-orange-700 font-black px-4">COUPON QR</Badge>
+              <h2 className="text-2xl font-black tracking-tight">{couponQr?.title}</h2>
+              <p className="text-sm font-bold opacity-80">
+                Save {couponQr?.discountAmount?.toFixed(2)} MUSD over {couponQr?.minimumSpend?.toFixed(2)} MUSD
+              </p>
+            </div>
+
+            <div className="bg-white p-4 rounded-3xl shadow-xl">
+              {couponQrUrl ? (
+                <QRCodeCanvas value={couponQrUrl} size={190} level="H" />
+              ) : null}
+            </div>
+
+            <p className="break-all text-xs font-bold opacity-80">{couponQrUrl}</p>
+          </div>
+          <div className="bg-slate-50 p-6 flex justify-center gap-2">
+            <Button variant="outline" onClick={() => setCouponQr(null)} className="rounded-full font-bold">
+              Close
+            </Button>
+            <Button onClick={() => window.print()} className="rounded-full gap-2 font-bold">
+              <Printer className="w-4 h-4" />
+              Print QR
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
