@@ -140,19 +140,42 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ cou
     const normalizedWallet = customerWallet ? String(customerWallet).toLowerCase().trim() : null;
     const sql = getSql();
 
-    const existing = await sql`
-      SELECT
-        id, customer_wallet, customer_referral_id, coupon_type, title,
-        discount_amount::float, minimum_spend::float,
-        status, source, source_ref, created_at, expires_at
-      FROM user_coupons
-      WHERE title = ${coupon.title}
-      AND (
-        (${customerReferralId}::text IS NOT NULL AND customer_referral_id = ${customerReferralId})
-        OR (${normalizedWallet}::text IS NOT NULL AND LOWER(customer_wallet) = ${normalizedWallet})
-      )
-      LIMIT 1
-    `;
+    // Different duplicate prevention strategies for different coupon types
+    let existing;
+    if (coupon.id === 'new-member-welcome') {
+      // New Member Welcome Coupon: lifetime limit - can only claim once ever
+      existing = await sql`
+        SELECT
+          id, customer_wallet, customer_referral_id, coupon_type, title,
+          discount_amount::float, minimum_spend::float,
+          status, source, source_ref, created_at, expires_at
+        FROM user_coupons
+        WHERE title = ${coupon.title}
+        AND (
+          (${customerReferralId}::text IS NOT NULL AND customer_referral_id = ${customerReferralId})
+          OR (${normalizedWallet}::text IS NOT NULL AND LOWER(customer_wallet) = ${normalizedWallet})
+        )
+        LIMIT 1
+      `;
+    } else {
+      // Other coupons (e.g., Next Purchase Coupon): allow re-claiming after use
+      // Only block if there's an unused coupon of the same type
+      existing = await sql`
+        SELECT
+          id, customer_wallet, customer_referral_id, coupon_type, title,
+          discount_amount::float, minimum_spend::float,
+          status, source, source_ref, created_at, expires_at
+        FROM user_coupons
+        WHERE title = ${coupon.title}
+        AND status = 'unused'
+        AND (
+          (${customerReferralId}::text IS NOT NULL AND customer_referral_id = ${customerReferralId})
+          OR (${normalizedWallet}::text IS NOT NULL AND LOWER(customer_wallet) = ${normalizedWallet})
+        )
+        ORDER BY created_at DESC
+        LIMIT 1
+      `;
+    }
 
     if (existing[0]) {
       return NextResponse.json({
