@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { 
   Settings, 
   Users, 
@@ -63,6 +64,11 @@ const COUPON_CAMPAIGNS = [
   }
 ];
 
+function shortValue(value?: string | null) {
+  if (!value) return '-';
+  return value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
+}
+
 export default function PosAdmin() {
   return (
     <Suspense fallback={<div className="p-8 text-center text-muted-foreground">Loading Control Center...</div>}>
@@ -73,7 +79,8 @@ export default function PosAdmin() {
 
 function PosAdminContent() {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<'settings' | 'staff' | 'coupons'>('settings');
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = useState<'settings' | 'staff' | 'members' | 'coupons'>('settings');
   
   // Settings State
   const [settings, setSettings] = useState<any>({
@@ -98,12 +105,35 @@ function PosAdminContent() {
   const [couponStats, setCouponStats] = useState<Record<string, { claimedCount: number; usedCount: number }>>({});
   const [couponQr, setCouponQr] = useState<any>(null);
   const [couponQrUrl, setCouponQrUrl] = useState('');
+  const [members, setMembers] = useState<any[]>([]);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [selectedMember, setSelectedMember] = useState<any>(null);
+  const [sendCouponMember, setSendCouponMember] = useState<any>(null);
+  const [selectedCouponId, setSelectedCouponId] = useState('new-member-welcome');
+  const [sendCouponLoading, setSendCouponLoading] = useState(false);
 
   useEffect(() => {
     fetchSettings();
     fetchStaff();
     fetchCouponStats();
+    fetchMembers();
   }, []);
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'settings' || tab === 'staff' || tab === 'members' || tab === 'coupons') {
+      setActiveTab(tab);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (activeTab !== 'members') return;
+    const timer = window.setTimeout(() => {
+      fetchMembers(memberSearch);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, memberSearch]);
 
   const fetchSettings = async () => {
     try {
@@ -122,6 +152,22 @@ function PosAdminContent() {
       setStaffList(data);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const fetchMembers = async (query = memberSearch) => {
+    setMembersLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (query.trim()) params.set('q', query.trim());
+      const res = await fetch(`/api/admin/members${params.toString() ? `?${params.toString()}` : ''}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Unable to load members');
+      setMembers(data.members || []);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Members Error", description: err.message || "Failed to load members." });
+    } finally {
+      setMembersLoading(false);
     }
   };
 
@@ -200,6 +246,33 @@ function PosAdminContent() {
     setCouponQrUrl(`${origin}/customer/coupon-claim/${encodeURIComponent(campaign.id)}`);
   };
 
+  const openSendCoupon = (member: any) => {
+    setSendCouponMember(member);
+    setSelectedCouponId('new-member-welcome');
+  };
+
+  const sendCouponToMember = async () => {
+    if (!sendCouponMember) return;
+    setSendCouponLoading(true);
+    try {
+      const res = await fetch(`/api/admin/members/${encodeURIComponent(sendCouponMember.id)}/send-coupon`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ couponId: selectedCouponId })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Unable to send coupon');
+      toast({ title: "Coupon sent successfully.", description: `${data.coupon?.title || 'Coupon'} is now available to this member.` });
+      setSendCouponMember(null);
+      await fetchMembers();
+      await fetchCouponStats();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Send Coupon Failed", description: err.message || "Unable to send coupon." });
+    } finally {
+      setSendCouponLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
       {/* Header */}
@@ -259,6 +332,17 @@ function PosAdminContent() {
             Staff Roster
           </button>
           <button
+            onClick={() => setActiveTab('members')}
+            className={`px-6 py-3 text-sm font-black uppercase tracking-widest transition-colors ${
+              activeTab === 'members'
+                ? 'border-b-2 border-primary text-primary'
+                : 'text-muted-foreground hover:text-primary'
+            }`}
+          >
+            <Users className="w-4 h-4 inline mr-2" />
+            Members
+          </button>
+          <button
             onClick={() => setActiveTab('coupons')}
             className={`px-6 py-3 text-sm font-black uppercase tracking-widest transition-colors ${
               activeTab === 'coupons'
@@ -303,6 +387,81 @@ function PosAdminContent() {
                </Card>
              ))}
            </div>
+        ) : activeTab === 'members' ? (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div className="space-y-1">
+                <h1 className="text-4xl font-black tracking-tight text-primary">Members</h1>
+                <p className="text-muted-foreground font-medium">Find a member and send a coupon for the next purchase.</p>
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  value={memberSearch}
+                  onChange={(event) => setMemberSearch(event.target.value)}
+                  placeholder="Search member..."
+                  className="w-full rounded-xl bg-white font-bold md:w-80"
+                />
+                <Button variant="outline" className="rounded-xl font-black" onClick={() => fetchMembers()}>
+                  <RefreshCw className={`mr-2 h-4 w-4 ${membersLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+              </div>
+            </div>
+
+            <Card className="border-none shadow-sm">
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[920px] border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-slate-100 text-left text-xs font-black uppercase tracking-wide text-slate-500">
+                        <th className="border-b border-slate-200 px-4 py-3">Name</th>
+                        <th className="border-b border-slate-200 px-4 py-3">Contact</th>
+                        <th className="border-b border-slate-200 px-4 py-3">Referral ID</th>
+                        <th className="border-b border-slate-200 px-4 py-3">Wallet</th>
+                        <th className="border-b border-slate-200 px-4 py-3">Coupons</th>
+                        <th className="border-b border-slate-200 px-4 py-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {membersLoading && members.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-10 text-center font-black text-slate-500">Loading members...</td>
+                        </tr>
+                      ) : members.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-10 text-center font-black text-slate-500">No members found.</td>
+                        </tr>
+                      ) : members.map((member) => (
+                        <tr key={member.id} className="hover:bg-slate-50">
+                          <td className="border-b border-slate-100 px-4 py-3">
+                            <button className="text-left font-black text-slate-950 hover:text-primary" onClick={() => setSelectedMember(member)}>
+                              {member.name || 'Unnamed Member'}
+                            </button>
+                          </td>
+                          <td className="border-b border-slate-100 px-4 py-3 font-bold text-slate-600">
+                            {member.phone || member.email || member.contact_info || '-'}
+                          </td>
+                          <td className="border-b border-slate-100 px-4 py-3 font-mono text-xs font-black">{member.referral_id}</td>
+                          <td className="border-b border-slate-100 px-4 py-3 font-mono text-xs font-bold text-slate-500">
+                            {shortValue(member.wallet_address)}
+                          </td>
+                          <td className="border-b border-slate-100 px-4 py-3">
+                            <Badge>{Number(member.unused_coupon_count || 0)} unused</Badge>
+                          </td>
+                          <td className="border-b border-slate-100 px-4 py-3 text-right">
+                            <Button size="sm" className="rounded-xl font-black" onClick={() => openSendCoupon(member)}>
+                              <TicketPercent className="mr-2 h-4 w-4" />
+                              Send Coupon
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         ) : activeTab === 'coupons' ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="space-y-1">
@@ -445,6 +604,116 @@ function PosAdminContent() {
         )}
       </main>
 
+      {/* Member Details Modal */}
+      <Dialog open={!!selectedMember} onOpenChange={() => setSelectedMember(null)}>
+        <DialogContent className="max-w-lg rounded-[2rem] border-none p-6 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-black text-primary">Member Details</DialogTitle>
+          </DialogHeader>
+          {selectedMember ? (
+            <div className="space-y-5">
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xl font-black text-slate-950">{selectedMember.name || 'Unnamed Member'}</p>
+                    <p className="mt-1 font-mono text-xs font-black text-slate-500">{selectedMember.referral_id}</p>
+                  </div>
+                  <Badge>{Number(selectedMember.unused_coupon_count || 0)} unused</Badge>
+                </div>
+                <div className="mt-4 grid gap-3 text-sm">
+                  <InfoRow label="Contact" value={selectedMember.phone || selectedMember.email || selectedMember.contact_info || '-'} />
+                  <InfoRow label="Wallet" value={selectedMember.wallet_address || '-'} />
+                  <InfoRow label="Used Coupons" value={String(selectedMember.used_coupon_count || 0)} />
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-black uppercase tracking-widest text-slate-500">Available Coupons</p>
+                {Array.isArray(selectedMember.unused_coupons) && selectedMember.unused_coupons.length > 0 ? (
+                  <div className="space-y-2">
+                    {selectedMember.unused_coupons.map((coupon: any) => (
+                      <div key={coupon.id} className="rounded-xl border border-slate-200 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-black text-slate-950">{coupon.title}</p>
+                            <p className="mt-1 text-xs font-bold text-slate-500">
+                              Spend {Number(coupon.minimum_spend || 0).toFixed(2)}, save {Number(coupon.discount_amount || 0).toFixed(2)}
+                            </p>
+                          </div>
+                          <Badge>{coupon.status}</Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl bg-slate-50 p-3 text-sm font-bold text-slate-500">No available coupons.</div>
+                )}
+              </div>
+
+              <Button className="h-12 w-full rounded-xl font-black" onClick={() => {
+                openSendCoupon(selectedMember);
+                setSelectedMember(null);
+              }}>
+                <TicketPercent className="mr-2 h-4 w-4" />
+                Send Coupon
+              </Button>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* Send Coupon Modal */}
+      <Dialog open={!!sendCouponMember} onOpenChange={() => setSendCouponMember(null)}>
+        <DialogContent className="max-w-md rounded-[2rem] border-none p-6 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-black text-primary">Send Coupon</DialogTitle>
+          </DialogHeader>
+          {sendCouponMember ? (
+            <div className="space-y-5">
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-500">Send coupon to</p>
+                <p className="mt-2 text-lg font-black text-slate-950">
+                  {sendCouponMember.name || 'Unnamed Member'} / {sendCouponMember.referral_id}
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                {COUPON_CAMPAIGNS.map((campaign) => (
+                  <label key={campaign.id} className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-4 ${
+                    selectedCouponId === campaign.id ? 'border-primary bg-primary/5' : 'border-slate-200 bg-white'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="couponId"
+                      value={campaign.id}
+                      checked={selectedCouponId === campaign.id}
+                      onChange={() => setSelectedCouponId(campaign.id)}
+                      className="mt-1"
+                    />
+                    <div className="min-w-0">
+                      <p className="font-black text-slate-950">{campaign.title}</p>
+                      <p className="mt-1 text-sm font-bold text-slate-500">
+                        Spend {campaign.minimumSpend.toFixed(2)}, save {campaign.discountAmount.toFixed(2)}
+                      </p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              <DialogFooter className="gap-2 sm:justify-end">
+                <Button variant="outline" className="rounded-xl font-black" onClick={() => setSendCouponMember(null)} disabled={sendCouponLoading}>
+                  Cancel
+                </Button>
+                <Button className="rounded-xl font-black" onClick={sendCouponToMember} disabled={sendCouponLoading}>
+                  {sendCouponLoading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <TicketPercent className="mr-2 h-4 w-4" />}
+                  Confirm Send
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
       {/* Staff Modal */}
       <Dialog open={isStaffModalOpen} onOpenChange={setIsStaffModalOpen}>
         <DialogContent className="max-w-md rounded-[3rem] p-8 border-none shadow-2xl">
@@ -578,6 +847,15 @@ function PosAdminContent() {
       </Dialog>
 
       <Toaster />
+    </div>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <span className="font-bold text-slate-500">{label}</span>
+      <span className="max-w-[280px] break-words text-right font-black text-slate-900">{value}</span>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from 'next/link';
-import { LogIn, Store, UserCheck } from 'lucide-react';
+import { Home, LogIn, UserCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -12,9 +12,16 @@ export default function ShoposHome() {
       <div className="mx-auto flex min-h-screen max-w-md flex-col bg-white shadow-2xl">
         <main className="flex flex-1 flex-col justify-center p-6">
           <div className="mb-8 space-y-3">
-            <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-slate-950 text-white">
-              <Store className="h-7 w-7" />
-            </div>
+            <Link
+              href="/pos/admin-home"
+              className="inline-flex items-center gap-3 rounded-xl p-1 text-slate-700 transition-colors active:bg-slate-100"
+              aria-label="Open Admin Console"
+            >
+              <span className="flex h-14 w-14 items-center justify-center rounded-lg bg-slate-950 text-white">
+                <Home className="h-7 w-7" />
+              </span>
+              <span className="text-xs font-black uppercase tracking-widest text-slate-400">Admin Console</span>
+            </Link>
             <div>
               <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">SHOPOS Mezo</p>
               <h1 className="text-3xl font-black tracking-tight">Staff Terminal</h1>
