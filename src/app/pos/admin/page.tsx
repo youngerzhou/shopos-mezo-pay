@@ -16,7 +16,8 @@ import {
   TrendingUp,
   X,
   Printer,
-  Wallet
+  Wallet,
+  PackageCheck
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -172,6 +173,12 @@ function PosAdminContent() {
               <h1 className="text-2xl font-black tracking-tight text-primary">ADMIN CONSOLE</h1>
             </div>
           </div>
+          <Link href="/pos/pickup-orders">
+            <Button className="rounded-md font-black">
+              <PackageCheck className="mr-2 h-4 w-4" />
+              Pickup Orders
+            </Button>
+          </Link>
         </div>
       </header>
 

@@ -127,6 +127,10 @@ export default function CustomerShopPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Unable to create order');
+      if (mode === 'pay_online' && data.paymentUrl) {
+        router.push(data.paymentUrl);
+        return;
+      }
       router.push(`/customer/order/${encodeURIComponent(data.order.order_id)}${mode === 'pay_online' ? '?pay=online' : ''}`);
     } catch (err: any) {
       setError(err.message || 'Unable to create order');

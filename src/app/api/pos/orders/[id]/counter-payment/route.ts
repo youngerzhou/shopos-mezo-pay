@@ -12,6 +12,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ order });
   } catch (error: any) {
     console.error('API POST /api/pos/orders/[id]/counter-payment Error:', error);
-    return NextResponse.json({ error: error.message || 'Unable to take payment' }, { status: 500 });
+    const status =
+      error.message === 'Order not found' ? 404 :
+      error.message === 'Order already completed' ? 409 :
+      500;
+    return NextResponse.json({ error: error.message || 'Unable to take payment' }, { status });
   }
 }

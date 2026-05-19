@@ -12,7 +12,7 @@ import {
   useWriteContract
 } from 'wagmi';
 import { ConnectKitButton, useModal } from 'connectkit';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { mezoTestnet, MEZO_RPC_URL, MUSD_ADDRESSES } from '@/app/lib/mezo-config';
 import { formatMUSD, formatMoney } from '@/lib/money';
@@ -200,6 +200,7 @@ function metricValue(value: number | null, invalid: boolean) {
 
 export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIntentIdFromPath?: string }) {
   const params = useSearchParams();
+  const router = useRouter();
   const publicClient = usePublicClient();
   const { address, isConnected, chainId, connector } = useAccount();
   const { connectors, error: connectError } = useConnect();
@@ -655,6 +656,15 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         const data = await res.json();
         if (!res.ok && !cancelled) {
           setError(data?.error || 'Payment failed');
+          return;
+        }
+        if (!cancelled && data?.status === 'confirmed' && orderId.startsWith('pos_')) {
+          const query = new URLSearchParams({
+            status: 'paid',
+            paymentIntentId,
+            txHash: String(paymentTxHash)
+          });
+          router.replace(`/customer/order/${encodeURIComponent(orderId)}/pickup?${query.toString()}`);
         }
       } catch (err: any) {
         if (!cancelled) setError(err.message || 'Payment failed');
@@ -665,7 +675,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     return () => {
       cancelled = true;
     };
-  }, [isPaymentConfirmed, paymentIntentId, paymentTxHash]);
+  }, [isPaymentConfirmed, orderId, paymentIntentId, paymentTxHash, router]);
 
   useEffect(() => {
     if (isApprovalConfirmed) {

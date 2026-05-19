@@ -1221,6 +1221,56 @@ export async function getPosOrderByPickupToken(token: string) {
   return getPosOrderDetail('pickup_token', token);
 }
 
+export async function listCustomerSelfPickupOrders(limit = 100) {
+  await ensureDb();
+  const sql = getSql();
+  const orders = await sql`
+    SELECT
+      po.id,
+      po.order_no,
+      po.customer_referral_id,
+      po.customer_wallet,
+      po.total_amount::float,
+      po.currency,
+      po.source,
+      po.fulfillment_type,
+      po.fulfillment_status,
+      po.pickup_token,
+      po.pickup_completed_at,
+      po.pickup_completed_by,
+      po.payment_method,
+      po.payment_status,
+      po.payment_tx_hash,
+      po.created_at,
+      COALESCE(c.username, po.customer_referral_id, 'Guest') AS customer_name,
+      COALESCE(
+        STRING_AGG(poi.product_name || ' x ' || poi.qty::text, ', ' ORDER BY poi.product_name),
+        ''
+      ) AS items_summary
+    FROM pos_orders po
+    LEFT JOIN customers c
+      ON po.customer_referral_id = c.referral_id
+    LEFT JOIN pos_order_items poi
+      ON po.id = poi.order_id
+    WHERE po.source = 'customer_self_order'
+    AND po.fulfillment_type = 'pickup'
+    GROUP BY
+      po.id,
+      c.username
+    ORDER BY
+      CASE
+        WHEN po.payment_status <> 'paid' AND po.fulfillment_status <> 'completed' THEN 1
+        WHEN po.payment_status = 'paid' AND po.fulfillment_status = 'ready_for_pickup' THEN 2
+        WHEN po.fulfillment_status = 'completed' THEN 3
+        ELSE 4
+      END,
+      po.created_at DESC
+    LIMIT ${limit}
+  `;
+
+  return orders;
+}
+
 export async function completePickupOrder(orderId: string, completedBy?: string | null) {
   await ensureDb();
   const sql = getSql();
@@ -1249,6 +1299,11 @@ export async function completePickupOrder(orderId: string, completedBy?: string 
 export async function markCounterPaymentReceived(orderId: string, method = 'counter') {
   await ensureDb();
   const sql = getSql();
+  const existing = await getPosOrderById(orderId);
+  if (!existing) throw new Error('Order not found');
+  if (existing.fulfillment_status === 'completed') throw new Error('Order already completed');
+  if (existing.payment_status === 'paid') return existing;
+
   const counterRef = `counter_${Date.now().toString(36)}`;
   const paid = await markPosOrderPaid(orderId, counterRef);
   await sql`
