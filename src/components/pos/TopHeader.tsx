@@ -59,7 +59,7 @@ export function TopHeader({
                 <span className="hidden text-xs font-black sm:inline">Daily Reconciliation</span>
               </Button>
             </Link>
-            <Link href="/pos/admin">
+            <Link href="/pos/admin-home">
               <Button variant="ghost" size="icon" className="h-10 w-10 rounded-lg hover:bg-red-950 hover:text-white">
                 <Settings className="h-4 w-4" />
               </Button>

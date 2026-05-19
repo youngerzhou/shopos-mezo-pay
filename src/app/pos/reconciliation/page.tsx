@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { CalendarDays, ChevronDown, Printer, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -258,6 +259,10 @@ export default function DailyReconciliationReportPage() {
     <main className="min-h-screen bg-slate-100 px-3 py-4 text-slate-950 print:bg-white print:p-0">
       <section className="no-print mx-auto mb-4 flex max-w-5xl flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:flex-row sm:items-end sm:justify-between">
         <div>
+          <Link href="/pos/admin-home" className="mb-2 inline-flex items-center gap-2 text-xs font-black uppercase tracking-wide text-orange-700">
+            <span>←</span>
+            <span>Admin Home</span>
+          </Link>
           <p className="text-xs font-black uppercase tracking-wide text-orange-700">ShopOS Mezo Pay</p>
           <h1 className="text-xl font-black">Daily Reconciliation Report</h1>
         </div>
@@ -360,7 +365,29 @@ export default function DailyReconciliationReportPage() {
         </section>
 
         <ReportSection title="1. Payment Summary">
-          <Table>
+          <div className="space-y-2 md:hidden">
+            {report.paymentSummary.map((row) => (
+              <div key={row.key} className={`rounded-2xl border p-3 ${row.blockchain ? 'border-orange-200 bg-orange-50' : 'border-slate-200 bg-white'}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-slate-950">{row.paymentMethod}</p>
+                    {row.blockchain ? <span className="mt-1 inline-flex rounded-full border border-orange-300 px-2 py-0.5 text-[10px] font-black uppercase text-orange-700">Blockchain</span> : null}
+                  </div>
+                  <p className="text-sm font-black text-slate-950">{money(row.amount)}</p>
+                </div>
+                <p className="mt-2 text-xs font-bold text-slate-500">{row.orderCount} orders</p>
+              </div>
+            ))}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-black uppercase tracking-wide text-slate-500">Collected Total</p>
+              <p className="mt-1 text-lg font-black text-slate-950">{money(paymentSummaryTotal)}</p>
+              <p className={`mt-1 text-xs font-black ${paymentMatchesNetPaid ? 'text-emerald-700' : 'text-amber-700'}`}>
+                {paymentMatchesNetPaid ? 'Matches Sales Totals' : `Review Difference ${money(paymentVariance)}`}
+              </p>
+            </div>
+          </div>
+
+          <Table className="hidden md:table">
             <thead>
               <tr>
                 <Th>Payment Method</Th>
@@ -572,8 +599,8 @@ function Metric({ label, value, strong, blockchain, warn, danger }: { label: str
   );
 }
 
-function Table({ children }: { children: React.ReactNode }) {
-  return <table className="w-full border-collapse text-sm">{children}</table>;
+function Table({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return <table className={`w-full border-collapse text-sm ${className}`}>{children}</table>;
 }
 
 function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {

@@ -9,7 +9,7 @@ export default function PosSettingsPage() {
         <Link href="/pos/admin-home">
           <Button variant="outline" size="sm" className="mb-5 rounded-xl font-black">
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Admin Home
+            Back to Admin Home
           </Button>
         </Link>
         <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-100 text-orange-700">

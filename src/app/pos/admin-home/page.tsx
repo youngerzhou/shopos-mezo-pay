@@ -25,8 +25,8 @@ type AdminStats = {
 const tiles = [
   { title: 'POS Orders', subtitle: 'View orders', href: '/pos/orders', icon: ShoppingBag },
   { title: 'Pickup Orders', subtitle: 'Waiting pickup', href: '/pos/pickup-orders', icon: PackageCheck },
-  { title: 'Members', subtitle: 'Member list', href: '/pos/admin?tab=members', icon: Users },
-  { title: 'Coupons', subtitle: 'Issue coupons', href: '/pos/admin?tab=coupons', icon: TicketPercent },
+  { title: 'Members', subtitle: 'Member list', href: '/pos/admin/members', icon: Users },
+  { title: 'Coupons', subtitle: 'Issue coupons', href: '/pos/admin/coupons', icon: TicketPercent },
   { title: 'Daily Sales', subtitle: 'Reconciliation', href: '/pos/reconciliation', icon: BarChart3 },
   { title: 'Products', subtitle: 'Catalog', href: '/pos/products', icon: Package },
   { title: 'Payments', subtitle: 'Payment status', href: '/pos/payments', icon: CreditCard },

@@ -103,9 +103,10 @@ export default function PickupOrdersPage() {
       <section className="mx-auto max-w-6xl space-y-5">
         <header className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            <Link href="/pos/admin">
-              <Button variant="outline" size="icon" className="rounded-md">
-                <ArrowLeft className="h-4 w-4" />
+            <Link href="/pos/admin-home">
+              <Button variant="outline" size="sm" className="rounded-md font-black">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back to Admin Home
               </Button>
             </Link>
             <div>
@@ -147,8 +148,39 @@ function OrderGroup({ title, orders, empty, tone }: { title: string; orders: Pic
       {orders.length === 0 ? (
         <div className="rounded-lg bg-slate-100 p-4 text-center text-sm font-bold text-slate-500">{empty}</div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] border-collapse text-sm">
+        <>
+          <div className="space-y-3 md:hidden">
+            {orders.map((order) => (
+              <article key={order.id} className="rounded-2xl border border-slate-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-slate-950">{order.order_no}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-500">{order.customer_name || order.customer_referral_id || '-'}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-500">{formatDate(order.created_at)}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-black text-slate-950">{money(order.total_amount)}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-500">{order.payment_status} / {order.fulfillment_status}</p>
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <ItemsPreview order={order} />
+                </div>
+                <div className="mt-3 flex justify-end">
+                  {order.fulfillment_status === 'completed' ? (
+                    <span className="inline-flex items-center rounded-md bg-slate-100 px-3 py-2 text-xs font-black text-slate-500">Completed</span>
+                  ) : (
+                    <Link href={`/pos/orders/claim/${encodeURIComponent(order.pickup_token)}`} className="inline-flex items-center rounded-md bg-orange-600 px-3 py-2 text-xs font-black text-white">
+                      {order.payment_status === 'paid' ? 'Complete Pickup' : 'Take Payment'}
+                    </Link>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[860px] border-collapse text-sm">
             <thead>
               <tr className="bg-slate-100 text-left text-xs font-black uppercase tracking-wide text-slate-500">
                 <th className="border border-slate-200 px-2 py-2">Order</th>
@@ -186,7 +218,8 @@ function OrderGroup({ title, orders, empty, tone }: { title: string; orders: Pic
               ))}
             </tbody>
           </table>
-        </div>
+          </div>
+        </>
       )}
     </section>
   );
