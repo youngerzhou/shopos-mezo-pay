@@ -2,11 +2,11 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, RefreshCw, Search, TicketPercent, Users } from 'lucide-react';
+import { ArrowLeft, Check, RefreshCw, Search, TicketPercent, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { BottomSheetFrame } from '@/components/pos/checkout/BottomSheetFrame';
 import { useToast } from '@/hooks/use-toast';
 
 type Member = {
@@ -107,13 +107,12 @@ export default function AdminMembersPage() {
             <Link href="/pos/admin-home">
               <Button variant="outline" size="sm" className="h-11 rounded-2xl font-black">
                 <ArrowLeft className="mr-2 h-4 w-4" />
-                Back to Admin Home
+                Back
               </Button>
             </Link>
             <div className="min-w-0">
               <p className="text-[10px] font-black uppercase tracking-[0.28em] text-orange-700">Admin Home</p>
-              <h1 className="mt-1 text-2xl font-black">Members</h1>
-              <p className="text-sm font-bold text-slate-500">Search a member and send a coupon.</p>
+              <h1 className="mt-1 text-2xl font-black text-slate-950">Members</h1>
             </div>
           </div>
 
@@ -128,26 +127,31 @@ export default function AdminMembersPage() {
           </div>
         </header>
 
-        <div className="space-y-3">
+        <div className="space-y-3 pb-20">
           {loading && members.length === 0 ? (
-            <div className="rounded-3xl border border-slate-200 bg-white p-5 text-center text-sm font-black text-slate-500">Loading members...</div>
+            <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-sm font-black text-slate-500">
+               <RefreshCw className="mx-auto mb-3 h-6 w-6 animate-spin opacity-20" />
+               Loading members...
+            </div>
           ) : members.length === 0 ? (
-            <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-5 text-center text-sm font-black text-slate-500">No members found.</div>
+            <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm font-black text-slate-500">
+               <Users className="mx-auto mb-3 h-6 w-6 opacity-20" />
+               No members found.
+            </div>
           ) : members.map((member) => (
             <article key={member.id} className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
               <button type="button" className="block w-full text-left" onClick={() => setSelectedMember(member)}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="truncate text-lg font-black">{member.name || 'Unnamed Member'}</h2>
+                    <h2 className="truncate text-lg font-black text-slate-950">{member.name || 'Unnamed Member'}</h2>
                     <p className="mt-1 text-sm font-bold text-slate-500">{member.phone || member.email || '-'}</p>
-                    <p className="mt-1 text-xs font-black text-slate-500">{member.referral_id}</p>
-                    <p className="mt-1 text-xs font-mono font-bold text-slate-400">{shortValue(member.wallet_address)}</p>
+                    <p className="mt-1 text-xs font-black text-slate-400">{member.referral_id}</p>
                   </div>
-                  <Badge className="shrink-0">{Number(member.unused_coupon_count || 0)} unused</Badge>
+                  <Badge className="shrink-0 bg-orange-100 text-orange-700 hover:bg-orange-100 border-none rounded-full px-3 py-1 font-bold">{Number(member.unused_coupon_count || 0)} unused</Badge>
                 </div>
               </button>
               <div className="mt-4 flex gap-2">
-                <Button className="h-11 flex-1 rounded-2xl font-black" onClick={() => setSendMember(member)}>
+                <Button className="h-12 flex-1 rounded-2xl bg-orange-600 font-black text-white hover:bg-red-950" onClick={() => setSendMember(member)}>
                   <TicketPercent className="mr-2 h-4 w-4" />
                   Send Coupon
                 </Button>
@@ -157,79 +161,101 @@ export default function AdminMembersPage() {
         </div>
       </section>
 
-      <Dialog open={!!selectedMember} onOpenChange={() => setSelectedMember(null)}>
-        <DialogContent className="max-w-md rounded-[2rem] border-none p-5 shadow-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-black">Member Details</DialogTitle>
-          </DialogHeader>
+      {/* Member Details Drawer */}
+      <BottomSheetFrame open={!!selectedMember} title="Member Details" onOpenChange={(open) => !open && setSelectedMember(null)}>
+        <div className="space-y-5 px-4 pb-10 pt-4">
+          <h3 className="text-center text-base font-black text-slate-950">Member Details</h3>
           {selectedMember ? (
-            <div className="space-y-4">
-              <div className="rounded-2xl bg-slate-50 p-4">
-                <p className="text-xl font-black">{selectedMember.name || 'Unnamed Member'}</p>
-                <p className="mt-1 text-sm font-bold text-slate-500">{selectedMember.phone || selectedMember.email || '-'}</p>
-                <p className="mt-1 text-xs font-black text-slate-500">{selectedMember.referral_id}</p>
-                <p className="mt-1 text-xs font-mono font-bold text-slate-400">{selectedMember.wallet_address || '-'}</p>
+            <div className="space-y-6">
+              <div className="rounded-2xl bg-slate-50 p-5">
+                <p className="text-xl font-black text-slate-950">{selectedMember.name || 'Unnamed Member'}</p>
+                <div className="mt-2 space-y-1">
+                  <p className="text-sm font-bold text-slate-500">{selectedMember.phone || selectedMember.email || '-'}</p>
+                  <p className="text-xs font-black text-slate-400">ID: {selectedMember.referral_id}</p>
+                  <p className="text-xs font-mono font-bold text-slate-400 truncate">{selectedMember.wallet_address || '-'}</p>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <p className="text-xs font-black uppercase tracking-widest text-slate-500">Available Coupons</p>
+              <div className="space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Available Coupons</p>
                 {Array.isArray(selectedMember.unused_coupons) && selectedMember.unused_coupons.length > 0 ? (
-                  selectedMember.unused_coupons.map((coupon) => (
-                    <div key={coupon.id} className="rounded-2xl border border-slate-200 p-3">
-                      <p className="font-black">{coupon.title}</p>
-                      <p className="mt-1 text-xs font-bold text-slate-500">
-                        Spend {Number(coupon.minimum_spend || 0).toFixed(2)}, save {Number(coupon.discount_amount || 0).toFixed(2)}
-                      </p>
-                    </div>
-                  ))
+                  <div className="space-y-2">
+                    {selectedMember.unused_coupons.map((coupon) => (
+                      <div key={coupon.id} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                        <p className="font-black text-slate-950">{coupon.title}</p>
+                        <p className="mt-1 text-xs font-bold text-slate-500">
+                          Spend {Number(coupon.minimum_spend || 0).toFixed(2)}, save {Number(coupon.discount_amount || 0).toFixed(2)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
                 ) : (
-                  <div className="rounded-2xl bg-slate-50 p-3 text-sm font-bold text-slate-500">No available coupons.</div>
+                  <div className="rounded-2xl bg-slate-50 p-5 text-center text-sm font-bold text-slate-500">
+                    No available coupons.
+                  </div>
                 )}
               </div>
 
-              <Button className="h-12 w-full rounded-2xl font-black" onClick={() => { setSendMember(selectedMember); setSelectedMember(null); }}>
-                Send Coupon
-              </Button>
+              <div className="flex flex-col gap-3">
+                <Button className="h-14 w-full rounded-2xl bg-orange-600 text-lg font-black text-white hover:bg-red-950" onClick={() => { setSendMember(selectedMember); setSelectedMember(null); }}>
+                  Send New Coupon
+                </Button>
+                <Button variant="ghost" className="h-12 w-full rounded-2xl font-bold text-slate-500" onClick={() => setSelectedMember(null)}>
+                  Close
+                </Button>
+              </div>
             </div>
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </div>
+      </BottomSheetFrame>
 
-      <Dialog open={!!sendMember} onOpenChange={() => setSendMember(null)}>
-        <DialogContent className="max-w-md rounded-[2rem] border-none p-5 shadow-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-black">Send Coupon</DialogTitle>
-          </DialogHeader>
+      {/* Send Coupon Drawer */}
+      <BottomSheetFrame open={!!sendMember} title="Send Coupon" onOpenChange={(open) => !open && setSendMember(null)}>
+        <div className="space-y-5 px-4 pb-10 pt-4">
+          <h3 className="text-center text-base font-black text-slate-950">Send Coupon</h3>
           {sendMember ? (
-            <div className="space-y-4">
-              <div className="rounded-2xl bg-slate-50 p-4">
-                <p className="text-xs font-black uppercase tracking-widest text-slate-500">Send coupon to</p>
-                <p className="mt-2 text-lg font-black">{sendMember.name || 'Unnamed Member'} / {sendMember.referral_id}</p>
+            <div className="space-y-6">
+              <div className="rounded-2xl bg-orange-50 p-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-orange-700">Recipient</p>
+                <p className="mt-1 text-lg font-black text-slate-950">{sendMember.name || 'Member'} / {sendMember.referral_id}</p>
               </div>
 
               <div className="space-y-2">
-                {COUPON_CAMPAIGNS.map((campaign) => (
-                  <label key={campaign.id} className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-4 ${selectedCouponId === campaign.id ? 'border-primary bg-primary/5' : 'border-slate-200 bg-white'}`}>
-                    <input type="radio" name="couponId" value={campaign.id} checked={selectedCouponId === campaign.id} onChange={() => setSelectedCouponId(campaign.id)} className="mt-1" />
-                    <div>
-                      <p className="font-black">{campaign.title}</p>
-                      <p className="mt-1 text-sm font-bold text-slate-500">Spend {campaign.minimumSpend.toFixed(2)}, save {campaign.discountAmount.toFixed(2)}</p>
-                    </div>
-                  </label>
-                ))}
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Select Campaign</p>
+                {COUPON_CAMPAIGNS.map((campaign) => {
+                  const isSelected = selectedCouponId === campaign.id;
+                  return (
+                    <button 
+                      key={campaign.id} 
+                      type="button"
+                      onClick={() => setSelectedCouponId(campaign.id)}
+                      className={`flex w-full items-center justify-between rounded-2xl border p-4 text-left transition-all ${
+                        isSelected ? 'border-orange-600 bg-orange-50' : 'border-slate-100 bg-white hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className={`font-black ${isSelected ? 'text-orange-700' : 'text-slate-950'}`}>{campaign.title}</p>
+                        <p className="mt-1 text-sm font-bold text-slate-500">Spend {campaign.minimumSpend.toFixed(2)}, save {campaign.discountAmount.toFixed(2)}</p>
+                      </div>
+                      {isSelected && <Check className="h-5 w-5 shrink-0 text-orange-700" />}
+                    </button>
+                  );
+                })}
               </div>
 
-              <DialogFooter className="gap-2 sm:justify-end">
-                <Button variant="outline" className="rounded-2xl font-black" onClick={() => setSendMember(null)} disabled={sending}>Cancel</Button>
-                <Button className="rounded-2xl font-black" onClick={sendCoupon} disabled={sending}>
-                  {sending ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <TicketPercent className="mr-2 h-4 w-4" />}
+              <div className="flex flex-col gap-3">
+                <Button className="h-14 w-full rounded-2xl bg-orange-600 text-lg font-black text-white hover:bg-red-950" onClick={sendCoupon} disabled={sending}>
+                  {sending ? <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> : <TicketPercent className="mr-2 h-5 w-5" />}
                   Confirm Send
                 </Button>
-              </DialogFooter>
+                <Button variant="ghost" className="h-12 w-full rounded-2xl font-bold text-slate-500" onClick={() => setSendMember(null)} disabled={sending}>
+                  Cancel
+                </Button>
+              </div>
             </div>
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </div>
+      </BottomSheetFrame>
     </main>
   );
 }

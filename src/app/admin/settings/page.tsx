@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useEffect, Suspense } from 'react';
@@ -17,20 +16,15 @@ import {
   TrendingUp,
   X,
   Printer,
-  Wallet
+  Wallet,
+  Check,
+  RefreshCw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle, 
-  DialogTrigger,
-  DialogFooter
-} from '@/components/ui/dialog';
+import { BottomSheetFrame } from '@/components/pos/checkout/BottomSheetFrame';
 import { 
   Select, 
   SelectContent, 
@@ -165,7 +159,6 @@ function AdminSettingsContent() {
     <div className="min-h-screen bg-slate-50">
       <Toaster />
       
-      {/* Mobile-friendly Sidebar/Nav */}
       <div className="max-w-6xl mx-auto flex flex-col md:flex-row min-h-screen">
         <aside className="w-full md:w-64 bg-white border-r border-slate-200 p-6 space-y-8">
           <div className="flex items-center gap-3">
@@ -174,13 +167,13 @@ function AdminSettingsContent() {
                  <ArrowLeft className="w-4 h-4" />
                </Button>
              </Link>
-             <h2 className="text-xl font-black tracking-tight text-primary">System Admin</h2>
+             <h2 className="text-xl font-black tracking-tight text-slate-900">System Admin</h2>
           </div>
 
           <nav className="space-y-2">
             <Button 
               variant={activeTab === 'settings' ? 'default' : 'ghost'} 
-              className="w-full justify-start gap-2 font-bold"
+              className={`w-full justify-start gap-2 font-bold ${activeTab === 'settings' ? 'bg-orange-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
               onClick={() => setActiveTab('settings')}
             >
               <Settings className="w-4 h-4" />
@@ -188,7 +181,7 @@ function AdminSettingsContent() {
             </Button>
             <Button 
               variant={activeTab === 'staff' ? 'default' : 'ghost'} 
-              className="w-full justify-start gap-2 font-bold"
+              className={`w-full justify-start gap-2 font-bold ${activeTab === 'staff' ? 'bg-orange-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
               onClick={() => setActiveTab('staff')}
             >
               <Users className="w-4 h-4" />
@@ -197,11 +190,11 @@ function AdminSettingsContent() {
           </nav>
 
           <div className="pt-8 border-t border-slate-100">
-             <div className="p-4 bg-primary/5 rounded-2xl">
-                <p className="text-[10px] font-black text-primary/40 uppercase tracking-widest mb-2">Network Status</p>
+             <div className="p-4 bg-orange-50 rounded-2xl">
+                <p className="text-[10px] font-black text-orange-700 uppercase tracking-widest mb-2">Network Status</p>
                 <div className="flex items-center gap-2">
                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                   <span className="text-xs font-bold text-primary">Live Mainnet Sync</span>
+                   <span className="text-xs font-bold text-slate-900">Live Mainnet Sync</span>
                 </div>
              </div>
           </div>
@@ -211,8 +204,8 @@ function AdminSettingsContent() {
           {activeTab === 'settings' ? (
             <div className="max-w-2xl space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                <div className="space-y-1">
-                 <h1 className="text-4xl font-black tracking-tight text-primary">Global Settings</h1>
-                 <p className="text-muted-foreground font-medium">Control the economic parameters of the Shopos ecosystem.</p>
+                 <h1 className="text-4xl font-black tracking-tight text-slate-950">Global Settings</h1>
+                 <p className="text-slate-500 font-medium">Control the economic parameters of the Shopos ecosystem.</p>
                </div>
 
                <div className="grid grid-cols-1 gap-6">
@@ -224,11 +217,11 @@ function AdminSettingsContent() {
                  ].map((s) => (
                    <Card key={s.key} className="border-none shadow-sm overflow-hidden">
                      <CardHeader className="pb-3 border-b border-slate-50">
-                       <div className="flex items-center gap-3 text-primary">
-                         {s.icon}
+                       <div className="flex items-center gap-3 text-slate-950">
+                         <span className="p-2 bg-orange-50 text-orange-600 rounded-lg">{s.icon}</span>
                          <div>
-                           <CardTitle className="text-base">{s.label}</CardTitle>
-                           <CardDescription className="text-xs">{s.desc}</CardDescription>
+                           <CardTitle className="text-base font-black">{s.label}</CardTitle>
+                           <CardDescription className="text-xs font-bold text-slate-500">{s.desc}</CardDescription>
                          </div>
                        </div>
                      </CardHeader>
@@ -236,9 +229,9 @@ function AdminSettingsContent() {
                        <Input 
                          value={settings[s.key]} 
                          onChange={(e) => setSettings({...settings, [s.key]: e.target.value})}
-                         className="font-mono text-lg font-bold"
+                         className="font-mono text-lg font-bold border-slate-200"
                        />
-                       <Button onClick={() => updateSettingValue(s.key, settings[s.key])}>
+                       <Button className="bg-slate-950 font-black hover:bg-orange-600" onClick={() => updateSettingValue(s.key, settings[s.key])}>
                          <Save className="w-4 h-4 mr-2" />
                          Save
                        </Button>
@@ -251,10 +244,10 @@ function AdminSettingsContent() {
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="flex justify-between items-end">
                 <div className="space-y-1">
-                  <h1 className="text-4xl font-black tracking-tight text-primary">Staff Roster</h1>
-                  <p className="text-muted-foreground font-medium">Manage permissions and store assignments.</p>
+                  <h1 className="text-4xl font-black tracking-tight text-slate-950">Staff Roster</h1>
+                  <p className="text-slate-500 font-medium">Manage permissions and store assignments.</p>
                 </div>
-                <Button className="rounded-full px-6 gap-2" onClick={() => {
+                <Button className="rounded-full px-6 gap-2 bg-orange-600 font-black hover:bg-red-950" onClick={() => {
                   setEditingStaff(null);
                   setStaffForm({ staff_id: '', username: '', role: 'staff', store_id: 'STORE_A' });
                   setIsStaffModalOpen(true);
@@ -271,11 +264,11 @@ function AdminSettingsContent() {
                     <div key={staff.id} className="p-6 space-y-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center font-black text-primary text-lg">
+                          <div className="w-12 h-12 rounded-full bg-orange-50 flex items-center justify-center font-black text-orange-700 text-lg">
                             {staff.username.charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <p className="font-bold text-slate-700">{staff.username}</p>
+                            <p className="font-bold text-slate-900">{staff.username}</p>
                             <p className="text-[10px] font-mono text-slate-400">{staff.staff_id}</p>
                           </div>
                         </div>
@@ -292,7 +285,7 @@ function AdminSettingsContent() {
                           {staff.store_id}
                         </div>
                         <div className="flex gap-2">
-                          <Button variant="ghost" size="icon" className="rounded-full w-10 h-10 hover:bg-primary/5 hover:text-primary" onClick={() => {
+                          <Button variant="ghost" size="icon" className="rounded-full w-10 h-10 hover:bg-orange-50 hover:text-orange-600" onClick={() => {
                              setEditingStaff(staff);
                              setStaffForm({
                                staff_id: staff.staff_id,
@@ -304,7 +297,7 @@ function AdminSettingsContent() {
                            }}>
                              <Edit2 className="w-4 h-4" />
                            </Button>
-                           <Button variant="ghost" size="icon" className="rounded-full w-10 h-10 hover:bg-secondary/5 hover:text-secondary" onClick={() => setBadgeStaff(staff)}>
+                           <Button variant="ghost" size="icon" className="rounded-full w-10 h-10 hover:bg-orange-50 hover:text-orange-600" onClick={() => setBadgeStaff(staff)}>
                              <QrCode className="w-4 h-4" />
                            </Button>
                            <Button variant="ghost" size="icon" className="rounded-full w-10 h-10 hover:bg-red-50 hover:text-red-600" onClick={() => deleteStaff(staff.id)}>
@@ -331,11 +324,11 @@ function AdminSettingsContent() {
                       <tr key={staff.id} className="hover:bg-slate-50/30 transition-colors">
                         <td className="py-4 px-6">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center font-black text-primary">
+                            <div className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center font-black text-orange-700">
                                {staff.username.charAt(0).toUpperCase()}
                             </div>
                             <div>
-                               <p className="font-bold text-slate-700">{staff.username}</p>
+                               <p className="font-bold text-slate-900">{staff.username}</p>
                                <p className="text-[10px] font-mono text-slate-400">{staff.staff_id}</p>
                             </div>
                           </div>
@@ -355,7 +348,7 @@ function AdminSettingsContent() {
                           </div>
                         </td>
                         <td className="py-4 px-6 text-right space-x-2">
-                           <Button variant="ghost" size="icon" className="rounded-full hover:bg-primary/5 hover:text-primary" onClick={() => {
+                           <Button variant="ghost" size="icon" className="rounded-full hover:bg-orange-50 hover:text-orange-600" onClick={() => {
                              setEditingStaff(staff);
                              setStaffForm({
                                staff_id: staff.staff_id,
@@ -367,7 +360,7 @@ function AdminSettingsContent() {
                            }}>
                              <Edit2 className="w-4 h-4" />
                            </Button>
-                           <Button variant="ghost" size="icon" className="rounded-full hover:bg-secondary/5 hover:text-secondary" onClick={() => setBadgeStaff(staff)}>
+                           <Button variant="ghost" size="icon" className="rounded-full hover:bg-orange-50 hover:text-orange-600" onClick={() => setBadgeStaff(staff)}>
                              <QrCode className="w-4 h-4" />
                            </Button>
                            <Button variant="ghost" size="icon" className="rounded-full hover:bg-red-50 hover:text-red-600" onClick={() => deleteStaff(staff.id)}>
@@ -384,37 +377,35 @@ function AdminSettingsContent() {
         </main>
       </div>
 
-      {/* Staff Modal */}
-      <Dialog open={isStaffModalOpen} onOpenChange={setIsStaffModalOpen}>
-        <DialogContent className="rounded-[2.5rem] p-8 max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-black tracking-tight">{editingStaff ? 'Update Profile' : 'New Member'}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
+      {/* Staff Modal - Unified as Bottom Sheet */}
+      <BottomSheetFrame open={isStaffModalOpen} title={editingStaff ? 'Update Profile' : 'New Member'} onOpenChange={setIsStaffModalOpen}>
+        <div className="space-y-6 px-4 pb-10 pt-4">
+          <h3 className="text-center text-base font-black text-slate-950">{editingStaff ? 'Update Profile' : 'Add New Staff'}</h3>
+          <div className="space-y-5">
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">Username</label>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Username</label>
               <Input 
                 value={staffForm.username} 
                 onChange={(e) => setStaffForm({...staffForm, username: e.target.value})} 
                 placeholder="e.g. Alice"
-                className="rounded-xl"
+                className="h-12 rounded-xl border-slate-200 font-bold"
               />
             </div>
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">Public Staff ID</label>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Public Staff ID</label>
               <Input 
                 value={staffForm.staff_id} 
                 onChange={(e) => setStaffForm({...staffForm, staff_id: e.target.value})} 
                 placeholder="e.g. SHOP_01"
                 disabled={!!editingStaff}
-                className="rounded-xl font-mono"
+                className="h-12 rounded-xl border-slate-200 font-mono font-bold"
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">Role</label>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Role</label>
                 <Select value={staffForm.role} onValueChange={(val) => setStaffForm({...staffForm, role: val})}>
-                  <SelectTrigger className="rounded-xl">
+                  <SelectTrigger className="h-12 rounded-xl border-slate-200 font-bold">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -425,9 +416,9 @@ function AdminSettingsContent() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">Store</label>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Store</label>
                 <Select value={staffForm.store_id} onValueChange={(val) => setStaffForm({...staffForm, store_id: val})}>
-                  <SelectTrigger className="rounded-xl">
+                  <SelectTrigger className="h-12 rounded-xl border-slate-200 font-bold">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -439,32 +430,32 @@ function AdminSettingsContent() {
               </div>
             </div>
           </div>
-          <DialogFooter className="flex-col gap-2 mt-4 sm:flex-col">
-            <Button className="w-full rounded-2xl h-12 font-bold" onClick={handleStaffSubmit}>
+          <div className="flex flex-col gap-3 pt-4">
+            <Button className="h-14 w-full rounded-2xl bg-orange-600 text-lg font-black text-white hover:bg-red-950" onClick={handleStaffSubmit}>
               {editingStaff ? 'Save Changes' : 'Create Account'}
             </Button>
-            <Button variant="ghost" className="w-full rounded-2xl h-12 font-bold" onClick={() => setIsStaffModalOpen(false)}>
+            <Button variant="ghost" className="h-12 w-full rounded-2xl font-bold text-slate-500" onClick={() => setIsStaffModalOpen(false)}>
               Cancel
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </div>
+        </div>
+      </BottomSheetFrame>
 
-      {/* QR Badge Modal */}
-      <Dialog open={!!badgeStaff} onOpenChange={() => setBadgeStaff(null)}>
-        <DialogContent className="max-w-sm rounded-[3rem] p-0 overflow-hidden border-none shadow-2xl">
-           <div className="bg-primary p-12 text-center text-white space-y-8 flex flex-col items-center">
+      {/* QR Badge Modal - Unified as Bottom Sheet */}
+      <BottomSheetFrame open={!!badgeStaff} title="Staff Badge" onOpenChange={() => setBadgeStaff(null)}>
+        <div className="bg-white px-4 pb-10 pt-4 overflow-hidden rounded-t-[3rem]">
+           <div className="bg-slate-950 rounded-[2.5rem] p-8 text-center text-white space-y-8 flex flex-col items-center shadow-2xl">
               <div className="space-y-2">
-                <Badge className="bg-secondary text-primary font-black animate-pulse px-4">OFFICIAL PARTNER</Badge>
+                <Badge className="bg-orange-600 text-white border-none font-black px-4 py-1 rounded-full text-[10px]">OFFICIAL PARTNER</Badge>
                 <h2 className="text-3xl font-black tracking-tight">{badgeStaff?.username}</h2>
-                <p className="text-white/50 text-xs font-medium uppercase tracking-[0.2em]">{badgeStaff?.role} @ {badgeStaff?.store_id}</p>
+                <p className="text-white/50 text-[10px] font-black uppercase tracking-[0.2em]">{badgeStaff?.role} @ {badgeStaff?.store_id}</p>
               </div>
 
-              <div className="p-8 bg-white rounded-[2.5rem] shadow-xl border-8 border-primary/20">
+              <div className="p-6 bg-white rounded-[2rem] shadow-xl border-8 border-orange-50">
                  <QRCodeCanvas 
                     id="badge-qr"
                     value={badgeStaff ? `https://${typeof window !== 'undefined' ? window.location.host : ''}/?staff_promo=${badgeStaff.staff_id}` : ''} 
-                    size={200}
+                    size={180}
                     level="H"
                  />
               </div>
@@ -474,18 +465,18 @@ function AdminSettingsContent() {
                  <p className="text-xs font-mono font-medium opacity-70">shopos.mezo/?staff_promo={badgeStaff?.staff_id}</p>
               </div>
 
-              <div className="flex gap-2 w-full no-print">
-                 <Button variant="secondary" className="flex-1 rounded-2xl h-12 font-bold gap-2 text-primary" onClick={printBadge}>
-                   <Printer className="w-4 h-4" />
+              <div className="flex gap-3 w-full no-print">
+                 <Button className="flex-1 rounded-2xl h-14 bg-orange-600 font-black text-white hover:bg-red-950 gap-2" onClick={printBadge}>
+                   <Printer className="w-5 h-5" />
                    Print Badge
                  </Button>
-                 <Button variant="ghost" className="bg-white/10 hover:bg-white/20 text-white rounded-2xl w-12 h-12 p-0" onClick={() => setBadgeStaff(null)}>
-                   <X className="w-5 h-5" />
+                 <Button variant="ghost" className="bg-white/10 hover:bg-white/20 text-white rounded-2xl w-14 h-14 p-0 shrink-0" onClick={() => setBadgeStaff(null)}>
+                   <X className="w-6 h-6" />
                  </Button>
               </div>
            </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </BottomSheetFrame>
 
       <style jsx global>{`
         @media print {
