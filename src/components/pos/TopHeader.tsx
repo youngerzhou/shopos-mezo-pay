@@ -93,13 +93,13 @@ export function TopHeader({
             </Button>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 text-xs font-bold lg:w-[420px]">
-            <div className="flex items-center gap-2 rounded-lg bg-orange-50 px-3 py-2">
-              <UserCheck className="h-4 w-4 text-orange-700" />
+          <div className="grid grid-cols-2 gap-2 text-[10px] font-bold sm:text-xs lg:w-[420px]">
+            <div className="flex min-w-0 items-center gap-1.5 rounded-lg bg-orange-50 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2">
+              <UserCheck className="h-3.5 w-3.5 shrink-0 text-orange-700 sm:h-4 sm:w-4" />
               <span className="min-w-0 truncate">{memberLabel}</span>
             </div>
-            <div className="flex items-center gap-2 rounded-lg bg-orange-50 px-3 py-2">
-              <Wallet className="h-4 w-4 text-orange-700" />
+            <div className="flex min-w-0 items-center gap-1.5 rounded-lg bg-orange-50 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2">
+              <Wallet className="h-3.5 w-3.5 shrink-0 text-orange-700 sm:h-4 sm:w-4" />
               <span className="min-w-0 truncate">{walletLabel}</span>
             </div>
           </div>

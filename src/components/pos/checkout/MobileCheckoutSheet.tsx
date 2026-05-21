@@ -364,7 +364,7 @@ export function MobileCheckoutSheet({
                 <p className="truncate text-lg font-black text-slate-950">{formatMoney(finalTotal)}</p>
               </div>
               <Button
-                className="h-12 rounded-xl bg-orange-600 px-7 text-base font-black text-white hover:bg-red-950"
+                className="h-12 rounded-xl bg-orange-600 px-4 text-sm font-black text-white hover:bg-red-950 xs:px-7 xs:text-base"
                 disabled={loading || cartItems.length === 0}
                 onClick={openPaymentSheet}
               >

@@ -179,9 +179,10 @@ function OrderGroup({ title, orders, empty, tone }: { title: string; orders: Pic
             ))}
           </div>
 
-          <div className="hidden overflow-x-auto md:block">
-            <table className="w-full min-w-[860px] border-collapse text-sm">
-            <thead>
+          <div className="hidden md:block">
+            <div className="w-full overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full min-w-[860px] border-collapse text-sm">
+              <thead>
               <tr className="bg-slate-100 text-left text-xs font-black uppercase tracking-wide text-slate-500">
                 <th className="border border-slate-200 px-2 py-2">Order</th>
                 <th className="border border-slate-200 px-2 py-2">Customer / Member</th>

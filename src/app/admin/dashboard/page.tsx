@@ -54,7 +54,8 @@ function AdminDashboardContent() {
             <Link href="/pos/reconciliation">
               <Button variant="outline" className="rounded-md font-black">
                 <ReceiptText className="mr-2 h-4 w-4" />
-                Daily Reconciliation / Daily Sales
+                <span className="hidden md:inline">Daily Reconciliation / Daily Sales</span>
+                <span className="md:hidden">Daily Sales</span>
               </Button>
             </Link>
             <Badge className="bg-primary text-primary-foreground px-4 py-1 rounded-full font-bold">ADMIN CONSOLE</Badge>

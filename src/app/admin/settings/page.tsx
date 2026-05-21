@@ -265,7 +265,59 @@ function AdminSettingsContent() {
               </div>
 
               <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden">
-                <table className="w-full">
+                {/* Mobile View: Card List */}
+                <div className="block md:hidden divide-y divide-slate-50">
+                  {staffList.map((staff) => (
+                    <div key={staff.id} className="p-6 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center font-black text-primary text-lg">
+                            {staff.username.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-700">{staff.username}</p>
+                            <p className="text-[10px] font-mono text-slate-400">{staff.staff_id}</p>
+                          </div>
+                        </div>
+                        <Badge variant="outline" className={`capitalize font-bold border-none ${
+                          staff.role === 'admin' ? 'bg-red-50 text-red-600' : 
+                          staff.role === 'manager' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'
+                        }`}>
+                          {staff.role}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between pt-2">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+                          <Store className="w-3 h-3" />
+                          {staff.store_id}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="ghost" size="icon" className="rounded-full w-10 h-10 hover:bg-primary/5 hover:text-primary" onClick={() => {
+                             setEditingStaff(staff);
+                             setStaffForm({
+                               staff_id: staff.staff_id,
+                               username: staff.username,
+                               role: staff.role || 'staff',
+                               store_id: staff.store_id || 'STORE_A'
+                             });
+                             setIsStaffModalOpen(true);
+                           }}>
+                             <Edit2 className="w-4 h-4" />
+                           </Button>
+                           <Button variant="ghost" size="icon" className="rounded-full w-10 h-10 hover:bg-secondary/5 hover:text-secondary" onClick={() => setBadgeStaff(staff)}>
+                             <QrCode className="w-4 h-4" />
+                           </Button>
+                           <Button variant="ghost" size="icon" className="rounded-full w-10 h-10 hover:bg-red-50 hover:text-red-600" onClick={() => deleteStaff(staff.id)}>
+                             <Trash2 className="w-4 h-4" />
+                           </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop View: Table */}
+                <table className="w-full hidden md:table">
                   <thead className="bg-slate-50/50 border-b border-slate-100">
                     <tr>
                       <th className="text-left py-4 px-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Employee</th>

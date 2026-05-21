@@ -608,7 +608,7 @@ export default function ShoposHome() {
           </div>
 
           {showReceipt && (
-            <section id="receipt-preview" className="receipt-print mx-auto max-w-[320px] bg-white p-4 font-mono text-[11px] leading-tight text-slate-950 shadow-xl">
+            <section id="receipt-preview" className="receipt-print mx-auto w-full max-w-[300px] bg-white p-4 font-mono text-[11px] leading-tight text-slate-950 shadow-xl sm:max-w-[320px]">
               <div className="text-center">
                 <p className="text-base font-black tracking-wide">SHOPOS Mezo</p>
                 <p className="mt-1 text-[10px] uppercase tracking-widest">Receipt Preview</p>
