@@ -91,7 +91,13 @@ async function main() {
   loadLocalEnv();
 
   const rpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL?.trim() || 'https://rpc.test.mezo.org/';
-  const musdAddress = getAddress(optionalEnv('MUSD_TOKEN_ADDRESS', 'NEXT_PUBLIC_MUSD_ADDRESS') || requireEnv('MUSD_TOKEN_ADDRESS'));
+  const resolvedMusd = process.env.NEXT_PUBLIC_MUSD_TOKEN_ADDRESS?.trim() || 
+                        process.env.MUSD_TOKEN_ADDRESS?.trim() || 
+                        process.env.NEXT_PUBLIC_MUSD_ADDRESS?.trim();
+  if (!resolvedMusd) {
+    throw new Error('NEXT_PUBLIC_MUSD_TOKEN_ADDRESS or MUSD_TOKEN_ADDRESS is required');
+  }
+  const musdAddress = getAddress(resolvedMusd);
   const merchantWallet = getAddress(firstEnv([
     'SHOPOS_MERCHANT_WALLET',
     'NEXT_PUBLIC_SHOPOS_MERCHANT_WALLET'

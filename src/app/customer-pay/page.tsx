@@ -9,7 +9,8 @@ import {
   usePublicClient,
   useSwitchChain,
   useWaitForTransactionReceipt,
-  useWriteContract
+  useWriteContract,
+  useSignTypedData
 } from 'wagmi';
 import { ConnectKitButton, useModal } from 'connectkit';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -38,6 +39,20 @@ const erc20Abi = [
     stateMutability: 'view',
     inputs: [],
     outputs: [{ name: '', type: 'string' }]
+  },
+  {
+    name: 'name',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }]
+  },
+  {
+    name: 'nonces',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'owner', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }]
   },
   {
     name: 'approve',
@@ -71,6 +86,22 @@ const shoposPaymentAbi = [
       { name: 'orderId', type: 'bytes32' },
       { name: 'merchant', type: 'address' },
       { name: 'amount', type: 'uint256' }
+    ],
+    outputs: []
+  },
+  {
+    name: 'payOrderWithPermit',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'paymentIntentId', type: 'bytes32' },
+      { name: 'orderId', type: 'bytes32' },
+      { name: 'merchant', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'deadline', type: 'uint256' },
+      { name: 'v', type: 'uint8' },
+      { name: 'r', type: 'bytes32' },
+      { name: 's', type: 'bytes32' }
     ],
     outputs: []
   }
@@ -206,6 +237,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   const { connectors, error: connectError } = useConnect();
   const { switchChain } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
+  const { signTypedDataAsync } = useSignTypedData();
   const { setOpen: setConnectModalOpen } = useModal();
 
   const [decimals, setDecimals] = useState(18);
@@ -219,6 +251,9 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   const [error, setError] = useState('');
   const [loadingBalances, setLoadingBalances] = useState(false);
   const [needsApproval, setNeedsApproval] = useState(false);
+  const [nonce, setNonce] = useState<bigint | null>(null);
+  const [tokenName, setTokenName] = useState<string>('MUSD Token');
+  const [isPermitSupported, setIsPermitSupported] = useState(false);
   const [tokenDiagnostics, setTokenDiagnostics] = useState<TokenDiagnostics>(emptyDiagnostics);
   const [lastWriteError, setLastWriteError] = useState('');
   const [paymentIntentDetails, setPaymentIntentDetails] = useState<PaymentIntentDetails | null>(null);
@@ -587,6 +622,29 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         return;
       }
 
+      // Try to read token name and nonces to check if Permit is supported
+      try {
+        const nameResult = await publicClient.readContract({
+          address: musdAddress as `0x${string}`,
+          abi: erc20Abi,
+          functionName: 'name'
+        });
+        setTokenName(String(nameResult || 'MUSD Token'));
+
+        const nonceResult = await publicClient.readContract({
+          address: musdAddress as `0x${string}`,
+          abi: erc20Abi,
+          functionName: 'nonces',
+          args: [address]
+        });
+        setNonce(nonceResult);
+        setIsPermitSupported(true);
+        console.log('[CustomerPayPermit] MUSD supports ERC-2612 Permit! Nonce:', nonceResult.toString());
+      } catch (err) {
+        console.log('[CustomerPayPermit] Token does not support Permit or nonces call failed:', err);
+        setIsPermitSupported(false);
+      }
+
       const enoughBalance = rawBalanceResult >= amountUnits;
       const enoughAllowance = rawAllowanceResult >= amountUnits;
       setNeedsApproval(!enoughAllowance);
@@ -891,6 +949,110 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     }
   };
 
+  const payOrderWithPermit = async () => {
+    setError('');
+    setLastWriteError('');
+    if (!requireWriteConnector()) return;
+    if (missingEnv.length > 0) {
+      setError(`Missing environment configuration: ${missingEnv.join(', ')}.`);
+      return;
+    }
+    if (tokenConfigInvalid || tokenAddressConfigError) {
+      setError(tokenDiagnostics.exactErrorMessage || tokenAddressConfigError || 'Token diagnostics failed. Run diagnostics for details.');
+      return;
+    }
+    if (!hasEnoughBalance) {
+      setError('Insufficient MUSD balance.');
+      return;
+    }
+    if (nonce === null) {
+      setError('Could not retrieve account nonce for Permit signature.');
+      return;
+    }
+
+    try {
+      setStep('paying');
+
+      // 1. Calculate permit parameters
+      // Set deadline to 1 hour from now
+      const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
+      // 2. Request EIP-712 typed signature from customer's wallet
+      const domain = {
+        name: tokenName,
+        version: '1',
+        chainId: chainId,
+        verifyingContract: musdAddress as `0x${string}`
+      };
+
+      const types = {
+        Permit: [
+          { name: 'owner', type: 'address' },
+          { name: 'spender', type: 'address' },
+          { name: 'value', type: 'uint256' },
+          { name: 'nonce', type: 'uint256' },
+          { name: 'deadline', type: 'uint256' }
+        ]
+      };
+
+      const message = {
+        owner: address as `0x${string}`,
+        spender: paymentContract as `0x${string}`,
+        value: amountInUnits,
+        nonce: nonce,
+        deadline: deadline
+      };
+
+      console.log('[CustomerPayPermit] Requesting signature:', { domain, types, message });
+      
+      const signature = await signTypedDataAsync({
+        domain,
+        types,
+        primaryType: 'Permit',
+        message
+      });
+
+      console.log('[CustomerPayPermit] Signature received:', signature);
+
+      // Parse signature into v, r, s
+      const r = signature.slice(0, 66) as `0x${string}`;
+      const s = `0x${signature.slice(66, 130)}` as `0x${string}`;
+      const v = parseInt(signature.slice(130, 132), 16);
+
+      // 3. Call ShopOSPayment.payOrderWithPermit()
+      const hash = await writeContractAsync({
+        address: paymentContract as `0x${string}`,
+        abi: shoposPaymentAbi,
+        functionName: 'payOrderWithPermit',
+        args: [
+          paymentIntentIdBytes32 as `0x${string}`,
+          orderIdBytes32 as `0x${string}`,
+          merchant as `0x${string}`,
+          amountInUnits,
+          deadline,
+          v,
+          r,
+          s
+        ]
+      });
+
+      setPaymentTxHash(hash);
+      setStep('submitted');
+
+      console.log('[CustomerPayPermit] Payment transaction submitted:', {
+        txHash: hash,
+        paymentIntentId,
+        orderId,
+        amount: amountInUnits.toString()
+      });
+    } catch (err: any) {
+      setStep('idle');
+      const message = err.message?.toLowerCase().includes('rejected') ? 'Payment cancelled by user' : err.message || 'Payment failed';
+      setLastWriteError(message);
+      setError(message);
+    }
+  };
+
   const primaryAction = () => {
     if (!writeConnectorReady) {
       setError('Wallet is not connected for signing. Please connect using MetaMask app browser or WalletConnect.');
@@ -899,7 +1061,12 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     if (isWrongNetwork) return switchToMezo();
     if (tokenConfigInvalid || tokenAddressConfigError || hasDiagnosticsError) return undefined;
     if (!hasEnoughBalance) return undefined;
-    return needsApproval ? approveMusd() : payOrder();
+    
+    if (isPermitSupported) {
+      return needsApproval ? payOrderWithPermit() : payOrder();
+    } else {
+      return needsApproval ? approveMusd() : payOrder();
+    }
   };
 
   const primaryLabel = !writeConnectorReady
@@ -914,8 +1081,6 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         ? 'Approving...'
         : step === 'paying'
         ? 'Paying...'
-        : needsApproval
-        ? 'Approve MUSD'
         : 'Pay MUSD';
 
   const disablePrimary =
@@ -1009,11 +1174,15 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
               ) : null}
               {!isWrongNetwork && isConnected && !tokenConfigInvalid && !tokenAddressConfigError && balance != null && !hasEnoughBalance ? <StatusBox tone="error" text="Insufficient MUSD balance." /> : null}
               
-              {/* Payment Mode Indicator */}
+               {/* Payment Mode Indicator */}
               {!isWrongNetwork && isConnected && !tokenConfigInvalid && !tokenAddressConfigError && !hasDiagnosticsError && (
                 <div className="mb-2 rounded-2xl bg-blue-50 p-3 text-sm font-bold text-blue-700">
                   <p>QR Contract Payment - Mode 2</p>
-                  <p className="text-xs font-normal text-blue-600">Customer signs transaction. ShopOSPayment contract emits OrderPaid event for Goldsky indexing.</p>
+                  <p className="text-xs font-normal text-blue-600">
+                    {isPermitSupported
+                      ? '⚡ One-click Permit payment enabled. Sign EIP-712 permit off-chain and pay in one step.'
+                      : 'Customer signs transaction. ShopOSPayment contract emits OrderPaid event for Goldsky indexing.'}
+                  </p>
                 </div>
               )}
 
