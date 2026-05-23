@@ -281,6 +281,16 @@ export function MobileCheckoutSheet({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="bottom"
+          onPointerDownOutside={(event) => {
+            if (activeSheet !== null) {
+              event.preventDefault();
+            }
+          }}
+          onInteractOutside={(event) => {
+            if (activeSheet !== null) {
+              event.preventDefault();
+            }
+          }}
           className="left-1/2 h-[96vh] w-full max-w-[430px] -translate-x-1/2 overflow-hidden rounded-t-3xl border-0 bg-slate-100 p-0 [&>button]:hidden"
         >
           <SheetTitle className="sr-only">Checkout</SheetTitle>
