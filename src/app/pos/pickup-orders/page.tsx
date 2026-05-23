@@ -220,6 +220,7 @@ function OrderGroup({ title, orders, empty, tone }: { title: string; orders: Pic
             </tbody>
           </table>
           </div>
+          </div>
         </>
       )}
     </section>
