@@ -1,5 +1,4 @@
-import Link from 'next/link';
-import { PackageSearch, QrCode, RefreshCw, ScanLine, Settings, User, UserCheck, Wallet, ReceiptText } from 'lucide-react';
+import { PackageSearch, QrCode, ScanLine, User, UserCheck, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -50,22 +49,6 @@ export function TopHeader({
                 <User className="h-4 w-4 text-orange-700" />
               </span>
               <span className="hidden text-xs font-black sm:inline">{staffName}</span>
-            </Button>
-            <Link href="/pos/reconciliation">
-              <Button variant="ghost" size="sm" className="h-10 gap-2 rounded-lg text-slate-700 hover:bg-red-950 hover:text-white" title="Daily Reconciliation">
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100">
-                  <ReceiptText className="h-4 w-4 text-orange-700" />
-                </span>
-                <span className="hidden text-xs font-black sm:inline">Daily Reconciliation</span>
-              </Button>
-            </Link>
-            <Link href="/pos/admin-home">
-              <Button variant="ghost" size="icon" className="h-10 w-10 rounded-lg hover:bg-red-950 hover:text-white">
-                <Settings className="h-4 w-4" />
-              </Button>
-            </Link>
-            <Button variant="ghost" size="icon" className="h-10 w-10 rounded-lg hover:bg-red-950 hover:text-white" onClick={onReset}>
-              <RefreshCw className="h-4 w-4" />
             </Button>
           </div>
         </div>
