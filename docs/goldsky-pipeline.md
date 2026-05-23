@@ -75,7 +75,7 @@ sources:
     version: 1.0.0
     start_at: 13107000
     filter: |
-      address = lower('0xcf0e257daacba51cbfec1580f3593b3dfdc2802b')
+      address = lower('0x25eae9a5cc45b83a9f693f375fb04bc3dc809b78')
 transforms:
   logs:
     type: sql
@@ -115,7 +115,7 @@ sources:
     version: 1.0.0
     start_at: 13107000
     filter: |
-      address = lower('0xcf0e257daacba51cbfec1580f3593b3dfdc2802b')
+      address = lower('0x25eae9a5cc45b83a9f693f375fb04bc3dc809b78')
 transforms:
   order_paid_logs:
     type: sql
