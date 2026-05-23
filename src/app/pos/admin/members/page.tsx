@@ -47,6 +47,15 @@ export default function AdminMembersPage() {
   const [sendMember, setSendMember] = useState<Member | null>(null);
   const [selectedCouponId, setSelectedCouponId] = useState('new-member-welcome');
   const [sending, setSending] = useState(false);
+  const [sentCoupons, setSentCoupons] = useState<Record<string, string[]>>({});
+
+  const currentCouponOwned = sendMember
+    ? sendMember.unused_coupons?.some(c => c.title === (COUPON_CAMPAIGNS.find(cp => cp.id === selectedCouponId)?.title))
+    : false;
+  const currentCouponSent = sendMember
+    ? sentCoupons[sendMember.id]?.includes(selectedCouponId)
+    : false;
+  const isDuplicate = !!(currentCouponOwned || currentCouponSent);
 
   const fetchMembers = async (term = query) => {
     setLoading(true);
@@ -80,6 +89,10 @@ export default function AdminMembersPage() {
 
   const sendCoupon = async () => {
     if (!sendMember) return;
+    if (isDuplicate) {
+      toast({ variant: 'destructive', title: 'Send Failed', description: 'This member already holds this coupon, please do not send duplicate.' });
+      return;
+    }
     setSending(true);
     try {
       const res = await fetch(`/api/admin/members/${encodeURIComponent(sendMember.id)}/send-coupon`, {
@@ -89,7 +102,20 @@ export default function AdminMembersPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Unable to send coupon');
-      toast({ title: 'Coupon sent successfully.', description: `${data.coupon?.title || 'Coupon'} sent to ${sendMember.name || sendMember.referral_id}.` });
+
+      // Update coupon sending history
+      setSentCoupons(prev => ({
+        ...prev,
+        [sendMember.id]: [...(prev[sendMember.id] || []), selectedCouponId]
+      }));
+
+      const couponTitle = COUPON_CAMPAIGNS.find(c => c.id === selectedCouponId)?.title || data.coupon?.title || 'Coupon';
+      const recipientName = sendMember.name || sendMember.phone || sendMember.wallet_address || sendMember.referral_id;
+
+      toast({ 
+        title: 'Success!', 
+        description: `Successfully sent [${couponTitle}] to customer [${recipientName}].` 
+      });
       setSendMember(null);
       await fetchMembers(query);
     } catch (err: any) {
@@ -224,6 +250,8 @@ export default function AdminMembersPage() {
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Select Campaign</p>
                 {COUPON_CAMPAIGNS.map((campaign) => {
                   const isSelected = selectedCouponId === campaign.id;
+                  const isAlreadySent = sendMember ? sentCoupons[sendMember.id]?.includes(campaign.id) : false;
+                  const isAlreadyOwned = sendMember ? sendMember.unused_coupons?.some(c => c.title === campaign.title) : false;
                   return (
                     <button 
                       key={campaign.id} 
@@ -234,7 +262,15 @@ export default function AdminMembersPage() {
                       }`}
                     >
                       <div className="min-w-0">
-                        <p className={`font-black ${isSelected ? 'text-orange-700' : 'text-slate-950'}`}>{campaign.title}</p>
+                        <div className="flex items-center gap-2">
+                          <p className={`font-black ${isSelected ? 'text-orange-700' : 'text-slate-950'}`}>{campaign.title}</p>
+                          {isAlreadySent && (
+                            <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none rounded-full px-2 py-0.5 text-[10px] font-bold shrink-0">Sent</Badge>
+                          )}
+                          {!isAlreadySent && isAlreadyOwned && (
+                            <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100 border-none rounded-full px-2 py-0.5 text-[10px] font-bold shrink-0">Owned</Badge>
+                          )}
+                        </div>
                         <p className="mt-1 text-sm font-bold text-slate-500">Spend {campaign.minimumSpend.toFixed(2)}, save {campaign.discountAmount.toFixed(2)}</p>
                       </div>
                       {isSelected && <Check className="h-5 w-5 shrink-0 text-orange-700" />}
@@ -243,10 +279,26 @@ export default function AdminMembersPage() {
                 })}
               </div>
 
+              {isDuplicate && (
+                <div className="rounded-2xl bg-amber-50 p-4 border border-amber-200">
+                  <p className="text-center text-xs font-bold text-amber-700 flex items-center justify-center gap-1">
+                    ⚠️ This member already holds this coupon. Please do not duplicate send.
+                  </p>
+                </div>
+              )}
+
               <div className="flex flex-col gap-3">
-                <Button className="h-14 w-full rounded-2xl bg-orange-600 text-lg font-black text-white hover:bg-red-950" onClick={sendCoupon} disabled={sending}>
+                <Button 
+                  className={`h-14 w-full rounded-2xl text-lg font-black text-white ${
+                    isDuplicate 
+                      ? 'bg-slate-200 text-slate-400 hover:bg-slate-200 cursor-not-allowed border border-slate-300 shadow-none' 
+                      : 'bg-orange-600 hover:bg-red-950'
+                  }`}
+                  onClick={sendCoupon} 
+                  disabled={sending || isDuplicate}
+                >
                   {sending ? <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> : <TicketPercent className="mr-2 h-5 w-5" />}
-                  Confirm Send
+                  {isDuplicate ? 'Already Owned/Sent' : 'Confirm Send'}
                 </Button>
                 <Button variant="ghost" className="h-12 w-full rounded-2xl font-bold text-slate-500" onClick={() => setSendMember(null)} disabled={sending}>
                   Cancel
