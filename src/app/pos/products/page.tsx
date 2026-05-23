@@ -187,10 +187,10 @@ export default function PosProductsPage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 md:px-8">
-      <div className="mx-auto max-w-md space-y-4">
+    <main className="min-h-screen bg-slate-50 py-6 text-slate-900 pb-safe">
+      <div className="container mx-auto px-4 space-y-6">
         {/* Header Section */}
-        <header className="rounded-3xl bg-white p-4 shadow-sm border border-slate-200/60">
+        <header className="rounded-3xl bg-white p-4 shadow-sm border border-slate-200/60 w-full">
           <div className="flex items-center gap-3">
             <Link href="/pos/admin-home">
               <Button variant="outline" size="sm" className="h-10 rounded-xl font-bold bg-white text-slate-800 border-slate-200">
@@ -217,31 +217,31 @@ export default function PosProductsPage() {
         </header>
 
         {/* Tip Banner */}
-        <div className="flex items-center gap-2.5 rounded-2xl bg-orange-50/60 border border-orange-100 p-3 text-xs font-bold text-orange-800">
+        <div className="flex items-center gap-2.5 rounded-2xl bg-orange-50/60 border border-orange-100 p-3 text-xs font-bold text-orange-800 w-full">
           <Sparkles className="h-4 w-4 text-orange-600 shrink-0" />
           <span>Tip: Hold a product card or tap the edit icon to quick edit details.</span>
         </div>
 
         {/* Catalog List */}
-        <div className="space-y-3 pb-24">
-          {loading ? (
-            <div className="rounded-3xl bg-white p-12 text-center text-sm font-bold border border-slate-200/60 text-slate-500 shadow-sm">
-              <RefreshCw className="mx-auto mb-3 h-6 w-6 animate-spin text-orange-600/40" />
-              Loading product catalog...
-            </div>
-          ) : filteredProducts.length === 0 ? (
-            <div className="rounded-3xl bg-white p-12 text-center text-sm font-bold border border-dashed border-slate-200/80 text-slate-500">
-              <Package className="mx-auto mb-3 h-8 w-8 text-slate-300" />
-              No matching products found.
-            </div>
-          ) : (
-            filteredProducts.map((product) => (
+        {loading ? (
+          <div className="rounded-3xl bg-white p-12 text-center text-sm font-bold border border-slate-200/60 text-slate-500 shadow-sm w-full">
+            <RefreshCw className="mx-auto mb-3 h-6 w-6 animate-spin text-orange-600/40" />
+            Loading product catalog...
+          </div>
+        ) : filteredProducts.length === 0 ? (
+          <div className="rounded-3xl bg-white p-12 text-center text-sm font-bold border border-dashed border-slate-200/80 text-slate-500 w-full">
+            <Package className="mx-auto mb-3 h-8 w-8 text-slate-300" />
+            No matching products found.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 pb-24">
+            {filteredProducts.map((product) => (
               <article
                 key={product.id}
                 onTouchStart={() => handleTouchStart(product)}
                 onTouchEnd={handleTouchEnd}
                 onTouchMove={handleTouchMove}
-                className="relative flex items-center gap-3.5 rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm select-none active:scale-[0.98] transition-all duration-200"
+                className="relative flex items-center gap-3.5 rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm select-none active:scale-[0.98] transition-all duration-200 w-full"
               >
                 {/* Product Thumbnail */}
                 <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-slate-100 border border-slate-100 shadow-inner">
@@ -292,9 +292,9 @@ export default function PosProductsPage() {
                   <Edit2 className="h-3.5 w-3.5" />
                 </button>
               </article>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Slide-Up Bottom Drawer */}
