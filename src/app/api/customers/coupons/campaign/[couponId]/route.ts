@@ -3,7 +3,8 @@ import {
   ensureDb,
   getCustomerByReferralId,
   getCustomerByWallet,
-  getSql
+  getSql,
+  getSetting
 } from '@/app/lib/db';
 import { roundMoney2 } from '@/app/lib/money';
 
@@ -46,6 +47,27 @@ function couponExpiry(days: number) {
 async function getClaimableCoupon(couponId: string): Promise<ClaimableCoupon | null> {
   const builtin = BUILTIN_COUPONS[couponId];
   if (builtin) return builtin;
+
+  // Load custom campaigns from settings
+  try {
+    const campaignsSetting = await getSetting('coupon_campaigns', '[]');
+    const parsedCampaigns = JSON.parse(campaignsSetting);
+    if (Array.isArray(parsedCampaigns)) {
+      const found = parsedCampaigns.find((c: any) => c.id === couponId);
+      if (found) {
+        return {
+          id: found.id,
+          couponType: found.couponType,
+          title: found.title,
+          discountAmount: roundMoney2(Number(found.discountAmount || 0)),
+          minimumSpend: roundMoney2(Number(found.minimumSpend || 0)),
+          expiresInDays: found.expiresInDays || 30
+        };
+      }
+    }
+  } catch (err) {
+    console.error('Failed to parse dynamic campaigns in claim endpoint:', err);
+  }
 
   const sql = getSql();
   const rows = await sql`

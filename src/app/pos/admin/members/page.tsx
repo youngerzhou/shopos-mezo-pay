@@ -28,7 +28,7 @@ type Member = {
   }>;
 };
 
-const COUPON_CAMPAIGNS = [
+const DEFAULT_CAMPAIGNS = [
   { id: 'new-member-welcome', title: 'New Member Welcome Coupon', discountAmount: 5, minimumSpend: 100 },
   { id: 'next-purchase-reward', title: 'Next Purchase Coupon', discountAmount: 3, minimumSpend: 50 }
 ];
@@ -40,6 +40,7 @@ function shortValue(value?: string | null) {
 
 export default function AdminMembersPage() {
   const { toast } = useToast();
+  const [campaigns, setCampaigns] = useState<any[]>(DEFAULT_CAMPAIGNS);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<Member[]>([]);
@@ -50,7 +51,7 @@ export default function AdminMembersPage() {
   const [sentCoupons, setSentCoupons] = useState<Record<string, string[]>>({});
 
   const currentCouponOwned = sendMember
-    ? sendMember.unused_coupons?.some(c => c.title === (COUPON_CAMPAIGNS.find(cp => cp.id === selectedCouponId)?.title))
+    ? sendMember.unused_coupons?.some(c => c.title === (campaigns.find(cp => cp.id === selectedCouponId)?.title))
     : false;
   const currentCouponSent = sendMember
     ? sentCoupons[sendMember.id]?.includes(selectedCouponId)
@@ -76,6 +77,18 @@ export default function AdminMembersPage() {
 
   useEffect(() => {
     fetchMembers('');
+    const fetchCampaigns = async () => {
+      try {
+        const res = await fetch('/api/admin/coupons', { cache: 'no-store' });
+        const data = await res.json();
+        if (res.ok && Array.isArray(data.campaigns)) {
+          setCampaigns(data.campaigns);
+        }
+      } catch (err) {
+        console.error('Failed to load campaigns:', err);
+      }
+    };
+    fetchCampaigns();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -109,7 +122,7 @@ export default function AdminMembersPage() {
         [sendMember.id]: [...(prev[sendMember.id] || []), selectedCouponId]
       }));
 
-      const couponTitle = COUPON_CAMPAIGNS.find(c => c.id === selectedCouponId)?.title || data.coupon?.title || 'Coupon';
+      const couponTitle = campaigns.find(c => c.id === selectedCouponId)?.title || data.coupon?.title || 'Coupon';
       const recipientName = sendMember.name || sendMember.phone || sendMember.wallet_address || sendMember.referral_id;
 
       toast({ 
@@ -248,7 +261,7 @@ export default function AdminMembersPage() {
 
               <div className="space-y-2">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Select Campaign</p>
-                {COUPON_CAMPAIGNS.map((campaign) => {
+                {campaigns.map((campaign) => {
                   const isSelected = selectedCouponId === campaign.id;
                   const isAlreadySent = sendMember ? sentCoupons[sendMember.id]?.includes(campaign.id) : false;
                   const isAlreadyOwned = sendMember ? sendMember.unused_coupons?.some(c => c.title === campaign.title) : false;
@@ -271,7 +284,11 @@ export default function AdminMembersPage() {
                             <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100 border-none rounded-full px-2 py-0.5 text-[10px] font-bold shrink-0">Owned</Badge>
                           )}
                         </div>
-                        <p className="mt-1 text-sm font-bold text-slate-500">Spend {campaign.minimumSpend.toFixed(2)}, save {campaign.discountAmount.toFixed(2)}</p>
+                        <p className="mt-1 text-sm font-bold text-slate-500">
+                          {campaign.minimumSpend > 0 
+                            ? `Spend ${campaign.minimumSpend.toFixed(2)}, save ${campaign.discountAmount.toFixed(2)}` 
+                            : `Save ${campaign.discountAmount.toFixed(2)}`}
+                        </p>
                       </div>
                       {isSelected && <Check className="h-5 w-5 shrink-0 text-orange-700" />}
                     </button>

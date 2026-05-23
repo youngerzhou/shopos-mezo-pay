@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureDb, getSql } from '@/app/lib/db';
+import { ensureDb, getSql, getSetting } from '@/app/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-const ADMIN_COUPONS: Record<string, {
+const DEFAULT_COUPONS: Record<string, {
   couponType: string;
   title: string;
   discountAmount: number;
@@ -39,6 +39,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ mem
     const { memberId } = await params;
     const body = await req.json().catch(() => ({}));
     const couponId = typeof body.couponId === 'string' ? body.couponId.trim() : '';
+
+    // Load dynamic campaigns from settings
+    const campaignsSetting = await getSetting('coupon_campaigns', '[]');
+    const parsedCampaigns = JSON.parse(campaignsSetting);
+    
+    // Construct dynamic campaigns lookup
+    const ADMIN_COUPONS = { ...DEFAULT_COUPONS };
+    if (Array.isArray(parsedCampaigns)) {
+      for (const camp of parsedCampaigns) {
+        ADMIN_COUPONS[camp.id] = {
+          couponType: camp.couponType,
+          title: camp.title,
+          discountAmount: camp.discountAmount,
+          minimumSpend: camp.minimumSpend,
+          expiresInDays: camp.expiresInDays || 30
+        };
+      }
+    }
+
     const coupon = ADMIN_COUPONS[couponId];
 
     if (!coupon) {
