@@ -107,7 +107,13 @@ const shoposPaymentAbi = [
   }
 ] as const;
 
-type Step = 'idle' | 'signing' | 'paying' | 'submitted' | 'confirmed';
+// Payment step state machine — no 'approving' step ever exists.
+// signing_permit: waiting for EIP-712 off-chain signature (wallet shows "Signature request", NOT "Spending cap")
+// paying: submitting the on-chain payOrderWithPermit transaction
+// confirming: wagmi waiting for tx receipt
+// confirmed: tx mined, navigating to success
+// failed: unrecoverable error (user can retry from idle)
+type Step = 'idle' | 'signing_permit' | 'paying' | 'confirming' | 'confirmed' | 'failed';
 
 type PaymentIntentDetails = {
   id: string;
@@ -687,7 +693,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   const hasEnoughAllowance = tokenDiagnostics.hasEnoughAllowance === 'yes';
 
   useEffect(() => {
-    if (isPaymentConfirmed && (step === 'paying' || step === 'submitted')) {
+    if (isPaymentConfirmed && (step === 'paying' || step === 'confirming')) {
       setStep('confirmed');
     }
   }, [isPaymentConfirmed, step]);
@@ -747,6 +753,159 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
       cancelled = true;
     };
   }, [isPaymentConfirmed, orderId, paymentIntentId, paymentTxHash, router]);
+
+  // ─── Payment action — EIP-712 Permit only, no approve() ever called ───────────
+  //
+  // Flow:
+  //   1. Click Pay → setStep('signing_permit')
+  //   2. signTypedDataAsync → wallet shows "Signature request" (free, no gas)
+  //   3. Extract v,r,s from signature → setStep('paying')
+  //   4. writeContractAsync(payOrderWithPermit) → wallet shows "Transaction request"
+  //   5. wagmi receipt hook fires → setStep('confirmed') → navigate to success
+  //
+  // The nonce is fetched fresh inside the function (not from stale React state)
+  // so it always works even if loadTokenState() hasn't fully resolved yet.
+  const payAndSign = async () => {
+    setError('');
+    setLastWriteError('');
+
+    if (!requireWriteConnector()) return;
+    if (missingEnv.length > 0) {
+      setError(`Missing environment configuration: ${missingEnv.join(', ')}.`);
+      return;
+    }
+    if (tokenConfigInvalid || tokenAddressConfigError) {
+      setError(tokenDiagnostics.exactErrorMessage || tokenAddressConfigError || 'Token configuration error.');
+      return;
+    }
+    if (!hasEnoughBalance) {
+      setError('Insufficient MUSD balance.');
+      return;
+    }
+    if (!address) {
+      setError('Wallet address unavailable.');
+      return;
+    }
+
+    try {
+      // ── Step 1: Get current nonce fresh from chain ──────────────────────────
+      // We always fetch this at click-time, not from React state, to prevent
+      // stale-nonce failures if the user had prior permit transactions.
+      let currentNonce = nonce;
+      if (currentNonce === null && publicClient) {
+        try {
+          currentNonce = await publicClient.readContract({
+            address: musdAddress as `0x${string}`,
+            abi: erc20Abi,
+            functionName: 'nonces',
+            args: [address]
+          });
+          setNonce(currentNonce);
+        } catch (err) {
+          console.warn('[PayAndSign] nonces() read failed — permit may not be supported:', err);
+          setError('MUSD token does not support EIP-2612 Permit on this network. Cannot proceed without permit.');
+          setStep('failed');
+          return;
+        }
+      }
+      if (currentNonce === null) {
+        setError('Could not retrieve account nonce. Please refresh and try again.');
+        setStep('failed');
+        return;
+      }
+
+      // ── Step 2: EIP-712 Permit signature ────────────────────────────────────
+      // Wallet shows a "Signature request" — NOT "Spending cap request".
+      // This is free (no gas) and grants one-time, exact-amount authorization.
+      setStep('signing_permit');
+
+      const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1-hour window
+
+      const permitDomain = {
+        name: tokenName || 'MUSD',
+        version: '1',
+        chainId: chainId ?? mezoTestnet.id,
+        verifyingContract: musdAddress as `0x${string}`
+      };
+
+      const permitTypes = {
+        Permit: [
+          { name: 'owner',    type: 'address' },
+          { name: 'spender',  type: 'address' },
+          { name: 'value',    type: 'uint256' },
+          { name: 'nonce',    type: 'uint256' },
+          { name: 'deadline', type: 'uint256' }
+        ]
+      };
+
+      const permitMessage = {
+        owner:    address as `0x${string}`,
+        spender:  paymentContract as `0x${string}`,
+        value:    amountInUnits,
+        nonce:    currentNonce,
+        deadline
+      };
+
+      console.log('[PayAndSign] Requesting EIP-712 permit signature', {
+        domain: permitDomain,
+        message: { ...permitMessage, value: amountInUnits.toString(), nonce: currentNonce.toString() }
+      });
+
+      const signature = await signTypedDataAsync({
+        domain: permitDomain,
+        types: permitTypes,
+        primaryType: 'Permit',
+        message: permitMessage
+      });
+
+      console.log('[PayAndSign] Permit signature obtained:', signature);
+
+      // ── Step 3: Submit on-chain transaction ──────────────────────────────────
+      // Single contract call: permit() + transferFrom() executed atomically.
+      // Wallet shows "Transaction request" — a normal tx, NOT a spending cap.
+      setStep('paying');
+
+      const r = signature.slice(0, 66) as `0x${string}`;
+      const s = `0x${signature.slice(66, 130)}` as `0x${string}`;
+      const v = parseInt(signature.slice(130, 132), 16);
+
+      console.log('[PayAndSign] Submitting payOrderWithPermit', {
+        paymentIntentIdBytes32,
+        orderIdBytes32,
+        merchant,
+        amount: amountInUnits.toString(),
+        deadline: deadline.toString(),
+        v
+      });
+
+      const hash = await writeContractAsync({
+        address: paymentContract as `0x${string}`,
+        abi: shoposPaymentAbi,
+        functionName: 'payOrderWithPermit',
+        args: [
+          paymentIntentIdBytes32 as `0x${string}`,
+          orderIdBytes32 as `0x${string}`,
+          merchant as `0x${string}`,
+          amountInUnits,
+          deadline,
+          v,
+          r,
+          s
+        ]
+      });
+
+      setPaymentTxHash(hash);
+      setStep('confirming');
+
+      console.log('[PayAndSign] Transaction submitted:', { txHash: hash, paymentIntentId, orderId });
+    } catch (err: any) {
+      const isRejected = /rejected|denied|cancelled|user rejected/i.test(err?.message || '');
+      const message = isRejected ? 'Payment cancelled by user.' : (err?.shortMessage || err?.message || 'Payment failed.');
+      setLastWriteError(message);
+      setError(message);
+      setStep(isRejected ? 'idle' : 'failed');
+    }
+  };
 
   const connectWallet = (show?: () => void) => {
     // Use ConnectKit modal to show wallet selector (same as register page)
@@ -841,195 +1000,19 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
 
 
 
-  const payOrder = async () => {
-    setError('');
-    setLastWriteError('');
-    if (!requireWriteConnector()) return;
-    if (missingEnv.length > 0) {
-      setError(`Missing environment configuration: ${missingEnv.join(', ')}.`);
-      return;
-    }
-    if (tokenConfigInvalid || tokenAddressConfigError) {
-      setError(tokenDiagnostics.exactErrorMessage || tokenAddressConfigError || 'Token diagnostics failed. Run diagnostics for details.');
-      return;
-    }
-    if (!hasEnoughBalance) {
-      setError('Insufficient MUSD balance.');
-      return;
-    }
-
-    try {
-      setStep('paying');
-      // QR Contract Payment Mode 2: Call ShopOSPayment.payOrder() which emits OrderPaid event
-      // Goldsky webhook indexes this event and reconciles the order
-      const hash = await writeContractAsync({
-        address: paymentContract as `0x${string}`,
-        abi: shoposPaymentAbi,
-        functionName: 'payOrder',
-        args: [
-          paymentIntentIdBytes32 as `0x${string}`,
-          orderIdBytes32 as `0x${string}`,
-          merchant as `0x${string}`,
-          amountInUnits
-        ]
-      });
-      setPaymentTxHash(hash);
-      setStep('submitted');
-      
-      console.log('[PaymentIntentIdentity] customer-pay contract args', {
-        paymentIntentId,
-        paymentRef: paymentIntentId,
-        orderId,
-        amount,
-        paymentIntentIdBytes32,
-        orderIdBytes32,
-        contractFunction: 'ShopOSPayment.payOrder'
-      });
-      console.log('[CustomerPay] Payment transaction submitted:', {
-        paymentMode: 'qr-contract-payment-mode-2',
-        paymentContract,
-        paymentIntentIdBytes32,
-        orderIdBytes32,
-        merchant,
-        amount: amountInUnits.toString(),
-        txHash: hash,
-      });
-    } catch (err: any) {
-      setStep('idle');
-      const message = err.message?.toLowerCase().includes('rejected') ? 'Payment cancelled by user' : err.message || 'Payment failed';
-      setLastWriteError(message);
-      setError(message);
-    }
-  };
-
-  const payOrderWithPermit = async () => {
-    setError('');
-    setLastWriteError('');
-    if (!requireWriteConnector()) return;
-    // Nonce must be loaded — this is part of the EIP-712 Permit signature domain
-    // If nonce is null, loadTokenState() didn't complete yet (unlikely but guard anyway)
-    if (missingEnv.length > 0) {
-      setError(`Missing environment configuration: ${missingEnv.join(', ')}.`);
-      return;
-    }
-    if (tokenConfigInvalid || tokenAddressConfigError) {
-      setError(tokenDiagnostics.exactErrorMessage || tokenAddressConfigError || 'Token diagnostics failed. Run diagnostics for details.');
-      return;
-    }
-    if (!hasEnoughBalance) {
-      setError('Insufficient MUSD balance.');
-      return;
-    }
-    if (nonce === null) {
-      setError('Could not retrieve account nonce for Permit signature.');
-      return;
-    }
-
-    try {
-      // Step 1: EIP-712 off-chain signature (free — no gas, no "Spending cap" dialog)
-      setStep('signing');
-
-      // 1. Calculate permit parameters
-      // Set deadline to 1 hour from now
-      const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
-
-      // 2. Request EIP-712 typed signature from customer's wallet
-      const domain = {
-        name: tokenName,
-        version: '1',
-        chainId: chainId,
-        verifyingContract: musdAddress as `0x${string}`
-      };
-
-      const types = {
-        Permit: [
-          { name: 'owner', type: 'address' },
-          { name: 'spender', type: 'address' },
-          { name: 'value', type: 'uint256' },
-          { name: 'nonce', type: 'uint256' },
-          { name: 'deadline', type: 'uint256' }
-        ]
-      };
-
-      const message = {
-        owner: address as `0x${string}`,
-        spender: paymentContract as `0x${string}`,
-        value: amountInUnits,
-        nonce: nonce,
-        deadline: deadline
-      };
-
-      console.log('[CustomerPayPermit] Requesting signature:', { domain, types, message });
-      
-      const signature = await signTypedDataAsync({
-        domain,
-        types,
-        primaryType: 'Permit',
-        message
-      });
-
-      console.log('[CustomerPayPermit] Signature received:', signature);
-
-      // Step 2: On-chain tx (one wallet popup — Transaction request, not Spending cap)
-      setStep('paying');
-
-      // Parse signature into v, r, s
-      const r = signature.slice(0, 66) as `0x${string}`;
-      const s = `0x${signature.slice(66, 130)}` as `0x${string}`;
-      const v = parseInt(signature.slice(130, 132), 16);
-
-      // 3. Call ShopOSPayment.payOrderWithPermit() — executes permit + transferFrom atomically
-      const hash = await writeContractAsync({
-        address: paymentContract as `0x${string}`,
-        abi: shoposPaymentAbi,
-        functionName: 'payOrderWithPermit',
-        args: [
-          paymentIntentIdBytes32 as `0x${string}`,
-          orderIdBytes32 as `0x${string}`,
-          merchant as `0x${string}`,
-          amountInUnits,
-          deadline,
-          v,
-          r,
-          s
-        ]
-      });
-
-      setPaymentTxHash(hash);
-      setStep('submitted');
-
-      console.log('[CustomerPayPermit] Payment transaction submitted:', {
-        txHash: hash,
-        paymentIntentId,
-        orderId,
-        amount: amountInUnits.toString()
-      });
-    } catch (err: any) {
-      setStep('idle');
-      const message = err.message?.toLowerCase().includes('rejected') ? 'Payment cancelled by user' : err.message || 'Payment failed';
-      setLastWriteError(message);
-      setError(message);
-    }
-  };
+  // payOrder() and payOrderWithPermit() replaced by unified payAndSign() above.
 
   const primaryAction = () => {
+    if (step === 'signing_permit' || step === 'paying' || step === 'confirming' || step === 'confirmed') return;
     if (!writeConnectorReady) {
-      setError('Wallet is not connected for signing. Please connect using MetaMask app browser or WalletConnect.');
+      setError('Wallet is not connected. Please open this page in MetaMask or connect with WalletConnect.');
       return connectWallet();
     }
     if (isWrongNetwork) return switchToMezo();
-    if (tokenConfigInvalid || tokenAddressConfigError || hasDiagnosticsError) return undefined;
-    if (!hasEnoughBalance) return undefined;
-
-    // EIP-712 Permit path — always preferred. One off-chain signature + one on-chain tx.
-    // No approve() is ever called; authorization is handled atomically inside payOrderWithPermit.
-    if (isPermitSupported) return payOrderWithPermit();
-
-    // Fallback: MUSD token does not support EIP-2612 permit.
-    // payOrder() requires the user to have a prior allowance (e.g. set manually).
-    // We intentionally do NOT call approve() automatically — the user must grant
-    // allowance separately to avoid triggering a "Spending cap request" popup.
-    return payOrder();
+    if (tokenConfigInvalid || tokenAddressConfigError || hasDiagnosticsError) return;
+    if (!hasEnoughBalance) return;
+    // Always use EIP-712 permit path — no approve(), no fallback
+    return payAndSign();
   };
 
   const primaryLabel = !writeConnectorReady
@@ -1037,26 +1020,28 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     : isWrongNetwork
       ? 'Switch to Mezo Testnet'
       : tokenConfigInvalid || tokenAddressConfigError || hasDiagnosticsError
-        ? 'Token diagnostics failed'
+        ? 'Token Error — Run Diagnostics'
         : !hasEnoughBalance
-        ? 'Insufficient MUSD balance'
-        : step === 'signing'
-        ? 'Signing Permit...'
-        : step === 'paying'
-        ? 'Submitting Payment...'
-        : isPermitSupported
-        ? '⚡ Sign & Pay with MUSD'
-        : hasEnoughAllowance
-        ? 'Pay MUSD'
-        : 'Insufficient Allowance';
+          ? 'Insufficient MUSD Balance'
+          : step === 'signing_permit'
+            ? '✍️ Signing Permit...'
+            : step === 'paying'
+              ? '⏳ Submitting Payment...'
+              : step === 'confirming'
+                ? '⏳ Confirming on Chain...'
+                : step === 'confirmed'
+                  ? '✅ Payment Confirmed'
+                  : step === 'failed'
+                    ? '⚡ Retry Payment'
+                    : '⚡ Sign & Pay with MUSD';
 
   const disablePrimary =
     loadingBalances ||
-    step === 'signing' ||
+    step === 'signing_permit' ||
     step === 'paying' ||
-    isPaymentConfirming ||
-    step === 'submitted' ||
+    step === 'confirming' ||
     step === 'confirmed' ||
+    isPaymentConfirming ||
     intentLoading ||
     !hasRequiredParams ||
     (writeConnectorReady && !isWrongNetwork && (tokenConfigInvalid || !!tokenAddressConfigError || hasDiagnosticsError || !hasEnoughBalance));
@@ -1141,24 +1126,13 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
               ) : null}
               {!isWrongNetwork && isConnected && !tokenConfigInvalid && !tokenAddressConfigError && balance != null && !hasEnoughBalance ? <StatusBox tone="error" text="Insufficient MUSD balance." /> : null}
               
-               {/* Payment Mode Indicator */}
+               {/* Payment Mode Indicator — always EIP-712 one-click */}
               {!isWrongNetwork && isConnected && !tokenConfigInvalid && !tokenAddressConfigError && !hasDiagnosticsError && (
-                <div className={`mb-2 rounded-2xl p-3 text-sm font-bold ${isPermitSupported ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'}`}>
-                  {isPermitSupported ? (
-                    <>
-                      <p className="font-black">⚡ One-Click Payment</p>
-                      <p className="mt-0.5 text-xs font-normal text-emerald-600">
-                        EIP-712 off-chain signature → on-chain payment. Single wallet confirmation. No separate approval step.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="font-black">Standard Payment Flow</p>
-                      <p className="mt-0.5 text-xs font-normal text-blue-600">
-                        Direct payment — requires prior MUSD allowance set on the contract.
-                      </p>
-                    </>
-                  )}
+                <div className="mb-2 rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">
+                  <p className="font-black">⚡ One-Click EIP-712 Payment</p>
+                  <p className="mt-0.5 text-xs font-normal text-emerald-600">
+                    Sign a free off-chain permit → automatic on-chain payment. No separate "Spending cap" approval.
+                  </p>
                 </div>
               )}
 
@@ -1181,7 +1155,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
                   disabled={disablePrimary}
                   onClick={primaryAction}
                 >
-                  {loadingBalances || step === 'signing' || step === 'paying' || isPaymentConfirming ? (
+                  {loadingBalances || step === 'signing_permit' || step === 'paying' || step === 'confirming' || isPaymentConfirming ? (
                     <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
                     <Wallet className="mr-2 h-4 w-4" />
@@ -1209,15 +1183,21 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
           <div className="rounded-3xl bg-white p-5 shadow-sm">
             <p className="text-sm font-black text-slate-950">Payment Transaction</p>
             <p className="mt-2 break-all rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-600">{paymentTxHash}</p>
-            {step === 'signing' ? <StatusBox tone="warn" text="Step 1/2 — Signing EIP-712 permit (free, no gas)..." /> : null}
-            {step === 'paying' ? <StatusBox tone="warn" text="Step 2/2 — Submitting payment transaction..." /> : null}
-            {step === 'submitted' || isPaymentConfirming ? <StatusBox tone="warn" text="Waiting for blockchain confirmation" /> : null}
+            {step === 'paying' ? <StatusBox tone="warn" text="Submitting payment transaction to chain..." /> : null}
+            {step === 'confirming' || isPaymentConfirming ? <StatusBox tone="warn" text="Waiting for blockchain confirmation..." /> : null}
             {step === 'confirmed' ? <StatusBox tone="success" text="Payment Confirmed ✔" /> : null}
-            {step === 'submitted' || step === 'confirmed' || isPaymentConfirming ? (
+            {(step === 'confirming' || step === 'confirmed' || isPaymentConfirming) ? (
               <p className="mt-3 text-xs font-bold text-slate-500">
                 The POS will be confirmed automatically by the Goldsky webhook after the OrderPaid event is indexed.
               </p>
             ) : null}
+          </div>
+        ) : step === 'signing_permit' ? (
+          <div className="rounded-3xl bg-emerald-50 p-5 shadow-sm">
+            <p className="text-sm font-black text-emerald-900">✍️ Permit Signature Pending</p>
+            <p className="mt-1 text-xs font-bold text-emerald-700">
+              Please check your wallet — a free off-chain signature request is waiting. This is not a transaction and costs no gas.
+            </p>
           </div>
         ) : null}
 
@@ -1282,7 +1262,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
             <DebugRow label="has enough allowance" value={tokenDiagnostics.hasEnoughAllowance || '-'} />
             <DebugRow label="last failed step" value={tokenDiagnostics.lastFailedStep || '-'} />
             <DebugRow label="exact error message" value={tokenDiagnostics.exactErrorMessage || '-'} />
-            <DebugRow label="payment method" value="ShopOSPayment.payOrder() → emits OrderPaid event" />
+            <DebugRow label="payment method" value="ShopOSPayment.payOrderWithPermit() — EIP-712 permit + transferFrom atomic" />
             <DebugRow label="Goldsky webhook" value="Indexes OrderPaid(paymentIntentId, orderId, merchant, payer, token, amount)" />
             <DebugRow label="order reconciliation" value="Deterministic via paymentIntentId/orderId in event" />
           </div>
