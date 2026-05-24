@@ -281,7 +281,6 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   const [intentLoading, setIntentLoading] = useState(Boolean(paymentIntentIdFromPath));
   const [intentError, setIntentError] = useState('');
   const [copiedPaymentLink, setCopiedPaymentLink] = useState(false);
-  const [paymentPageUrl, setPaymentPageUrl] = useState('');
   const [walletDebug, setWalletDebug] = useState({
     isMobile: 'unknown',
     hasWindowEthereum: 'unknown',
@@ -314,7 +313,6 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     return connectors.map((item) => `${item.name} (${item.id})`).join(', ');
   }, [connectors]);
   const writeConnectorReady = Boolean(isConnected && address && connector && typeof writeContractAsync === 'function');
-  const isMobileBrowserWithoutProvider = walletDebug.isMobile === 'yes' && walletDebug.hasWindowEthereum === 'no';
   const injectedConnector = useMemo(() => (
     connectors.find((item) => item.type === 'injected' || /metaMask|injected/i.test(`${item.id} ${item.name}`))
   ), [connectors]);
@@ -346,11 +344,6 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
       lastWriteError: lastWriteError || '-'
     });
   }, [connectError?.message, connector, connectors, lastWriteError, writeConnectorReady]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    setPaymentPageUrl(window.location.href);
-  }, [paymentIntentId]);
 
   useEffect(() => {
     if (!paymentIntentIdFromPath) return;
@@ -1119,28 +1112,6 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
             <StatusBox tone="error" text="Invalid payment link. Missing payment intent details." />
           ) : (
             <>
-              {isMobileBrowserWithoutProvider && !writeConnectorReady ? (
-                <div className="mb-4 rounded-2xl border border-orange-200 bg-orange-50 p-4">
-                  <p className="text-sm font-black text-orange-900">Mobile Wallet Options</p>
-                  <p className="mt-2 text-sm font-bold text-orange-800">
-                    Tap Connect Wallet below to open this payment page in MetaMask.
-                  </p>
-                  {paymentPageUrl ? (
-                    <p className="mt-3 break-all rounded-xl bg-white p-3 text-xs font-bold text-slate-600">
-                      {paymentPageUrl}
-                    </p>
-                  ) : null}
-                  <ConnectKitButton.Custom>
-                    {({ show }) => (
-                      <Button className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white text-sm font-black text-slate-800 hover:bg-slate-50" onClick={() => connectWallet(show)} type="button">
-                        <Wallet className="mr-2 h-4 w-4" />
-                        Connect with WalletConnect
-                      </Button>
-                    )}
-                  </ConnectKitButton.Custom>
-                </div>
-              ) : null}
-
               {isConnected ? (
                 <div className="mb-4 rounded-2xl bg-slate-50 p-3 text-sm font-bold">
                   <p className="text-slate-500">Customer wallet</p>
@@ -1203,28 +1174,27 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
                 </Button>
               ) : null}
               {!writeConnectorReady ? (
-                <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-3">
-                  <p className="text-xs font-bold text-slate-600">
-                    Tip: If the wallet doesn't open automatically, copy the link and paste it into your wallet browser.
+                <div className="mt-3 text-center">
+                  <p className="text-xs font-bold text-slate-500">
+                    If your wallet does not open, copy this link into your wallet browser.
                   </p>
-                  <Button className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white text-sm font-black text-slate-800 hover:bg-slate-50" onClick={copyPaymentLink} type="button">
+                  <Button className="mt-2 h-10 rounded-xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 hover:bg-slate-50" onClick={copyPaymentLink} type="button">
                     <Copy className="mr-2 h-4 w-4" />
                     {copiedPaymentLink ? 'Copied' : 'Copy Link'}
                   </Button>
                 </div>
               ) : null}
-              {walletDebug.isMobile === 'yes' && !writeConnectorReady ? (
-                <StatusBox tone="warn" text="Please open this payment page in MetaMask, OKX Wallet, Trust Wallet, or connect with WalletConnect." />
+              {isConnected ? (
+                <Button
+                  className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white text-sm font-black text-slate-800 hover:bg-slate-50"
+                  disabled={loadingBalances}
+                  onClick={loadTokenState}
+                  type="button"
+                >
+                  {loadingBalances ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                  Run Token Diagnostics
+                </Button>
               ) : null}
-              <Button
-                className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white text-sm font-black text-slate-800 hover:bg-slate-50"
-                disabled={loadingBalances}
-                onClick={loadTokenState}
-                type="button"
-              >
-                {loadingBalances ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                Run Token Diagnostics
-              </Button>
             </>
           )}
         </div>
