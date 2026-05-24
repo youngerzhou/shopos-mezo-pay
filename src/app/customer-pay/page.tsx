@@ -353,47 +353,6 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   }, [paymentIntentId]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!paymentIntentId || isConnected) return;
-
-    const userAgent = window.navigator.userAgent || '';
-    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent);
-    const hasEthereum = Boolean((window as any).ethereum);
-    const currentUrl = window.location.href;
-
-    if (!isMobile || !currentUrl.startsWith('http')) return;
-
-    if (!hasEthereum) {
-      const deeplinkKey = `shopos:mm-deeplink:${paymentIntentId}`;
-      if (window.sessionStorage.getItem(deeplinkKey) === '1') return;
-
-      window.sessionStorage.setItem(deeplinkKey, '1');
-      const mmUniversalLink = `https://metamask.app.link/dapp/${currentUrl.replace(/^https?:\/\//, '')}`;
-      console.log('[MetaMask Deeplink] auto redirect external mobile browser', {
-        paymentIntentId,
-        currentUrl,
-        mmUniversalLink
-      });
-      window.location.href = mmUniversalLink;
-      return;
-    }
-
-    if (!injectedConnector) return;
-    const injectedConnectKey = `shopos:injected-connect:${paymentIntentId}`;
-    if (window.sessionStorage.getItem(injectedConnectKey) === '1') return;
-
-    window.sessionStorage.setItem(injectedConnectKey, '1');
-    console.log('[WalletConnectDebug] auto connect injected wallet inside mobile wallet browser', {
-      connector: `${injectedConnector.name} (${injectedConnector.id})`,
-      paymentIntentId
-    });
-    connectAsync({ connector: injectedConnector }).catch((err: any) => {
-      window.sessionStorage.removeItem(injectedConnectKey);
-      console.warn('[WalletConnectDebug] injected auto connect failed', serializeError(err));
-    });
-  }, [connectAsync, injectedConnector, isConnected, paymentIntentId]);
-
-  useEffect(() => {
     if (!paymentIntentIdFromPath) return;
     let cancelled = false;
 
@@ -993,7 +952,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
 
     try {
       if (typeof window !== 'undefined' && walletDebug.isMobile === 'yes' && walletDebug.hasWindowEthereum === 'no') {
-        openMetaMaskDeepLink(true);
+        openMetaMaskDeepLink();
         return;
       }
 
@@ -1028,7 +987,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     }
   };
 
-  const openMetaMaskDeepLink = (force = false) => {
+  const openMetaMaskDeepLink = () => {
     const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
     if (!currentUrl || !currentUrl.startsWith('http')) {
       setError('Invalid payment page URL');
@@ -1038,11 +997,8 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
       setError('Invalid payment page URL');
       throw new Error('Invalid payment page URL');
     }
-    if (!force && typeof window !== 'undefined' && (window as any).ethereum) {
-      console.log('[MetaMask Deeplink] skipped because injected provider is already available');
-      return;
-    }
-    const metamaskDeepLink = `https://metamask.app.link/dapp/${currentUrl.replace(/^https?:\/\//, '')}`;
+    const dappUrl = currentUrl.replace(/^https?:\/\//, '');
+    const metamaskDeepLink = `metamask://dapp/${dappUrl}`;
     console.log('[MetaMask Deeplink] currentUrl:', currentUrl);
     console.log('[MetaMask Deeplink] paymentIntentId:', paymentIntentId);
     console.log('[MetaMask Deeplink] deepLink:', metamaskDeepLink);
@@ -1167,12 +1123,8 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
                 <div className="mb-4 rounded-2xl border border-orange-200 bg-orange-50 p-4">
                   <p className="text-sm font-black text-orange-900">Mobile Wallet Options</p>
                   <p className="mt-2 text-sm font-bold text-orange-800">
-                    This browser cannot sign blockchain transactions directly. Please open this payment page in a wallet app.
+                    Tap Connect Wallet below to open this payment page in MetaMask.
                   </p>
-                  <Button className="mt-4 h-11 w-full rounded-xl bg-orange-600 text-sm font-black text-white hover:bg-red-950" onClick={() => openMetaMaskDeepLink(true)} type="button">
-                    <Wallet className="mr-2 h-4 w-4" />
-                    Open in MetaMask
-                  </Button>
                   {paymentPageUrl ? (
                     <p className="mt-3 break-all rounded-xl bg-white p-3 text-xs font-bold text-slate-600">
                       {paymentPageUrl}
@@ -1186,10 +1138,6 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
                       </Button>
                     )}
                   </ConnectKitButton.Custom>
-                  <Button className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white text-sm font-black text-slate-800 hover:bg-slate-50" onClick={copyPaymentLink} type="button">
-                    <Copy className="mr-2 h-4 w-4" />
-                    {copiedPaymentLink ? 'Copied' : 'Copy payment link'}
-                  </Button>
                 </div>
               ) : null}
 
@@ -1253,6 +1201,17 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
                   )}
                   {primaryLabel}
                 </Button>
+              ) : null}
+              {!writeConnectorReady ? (
+                <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-3">
+                  <p className="text-xs font-bold text-slate-600">
+                    Tip: If the wallet doesn't open automatically, copy the link and paste it into your wallet browser.
+                  </p>
+                  <Button className="mt-3 h-11 w-full rounded-xl border border-slate-200 bg-white text-sm font-black text-slate-800 hover:bg-slate-50" onClick={copyPaymentLink} type="button">
+                    <Copy className="mr-2 h-4 w-4" />
+                    {copiedPaymentLink ? 'Copied' : 'Copy Link'}
+                  </Button>
+                </div>
               ) : null}
               {walletDebug.isMobile === 'yes' && !writeConnectorReady ? (
                 <StatusBox tone="warn" text="Please open this payment page in MetaMask, OKX Wallet, Trust Wallet, or connect with WalletConnect." />
