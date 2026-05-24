@@ -65,16 +65,6 @@ const erc20Abi = [
     outputs: [{ name: '', type: 'bool' }]
   },
   {
-    name: 'approve',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'spender', type: 'address' },
-      { name: 'amount', type: 'uint256' }
-    ],
-    outputs: [{ name: '', type: 'bool' }]
-  },
-  {
     name: 'allowance',
     type: 'function',
     stateMutability: 'view',
@@ -1239,16 +1229,6 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     };
 
     try {
-      setStep('simulating');
-      console.log('[DirectTransfer] Simulating MUSD.transfer fallback:', directDiagnostics);
-      await publicClient.simulateContract({
-        account: address as `0x${string}`,
-        address: musdAddress as `0x${string}`,
-        abi: erc20Abi,
-        functionName: 'transfer',
-        args: [merchant as `0x${string}`, amountWei]
-      });
-
       setStep('paying');
       console.log('[DirectTransfer] Submitting MUSD.transfer fallback:', directDiagnostics);
       const hash = await writeContractAsync({
@@ -1396,7 +1376,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
       return connectWallet();
     }
     if (isWrongNetwork) return switchToMezo();
-    if (tokenConfigInvalid || tokenAddressConfigError || hasDiagnosticsError) return;
+    if (hasBlockingPaymentError) return;
     if (!hasEnoughBalance) return;
     return paymentMode === 'direct_transfer' ? payDirectTransfer() : payAndSign();
   };
@@ -1404,12 +1384,13 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   const modeLabel = paymentMode === 'direct_transfer'
     ? 'Mode 3 Direct Transfer'
     : 'Mode 2 EIP-712 Permit';
+  const hasBlockingPaymentError = tokenConfigInvalid || !!tokenAddressConfigError || (paymentMode === 'permit' && hasDiagnosticsError);
 
   const primaryLabel = !writeConnectorReady
     ? '🔌 Connect Wallet'
     : isWrongNetwork
       ? 'Switch to Mezo Testnet'
-      : tokenConfigInvalid || tokenAddressConfigError || hasDiagnosticsError
+      : hasBlockingPaymentError
         ? 'Token Error — Run Diagnostics'
         : !hasEnoughBalance
           ? 'Insufficient MUSD Balance'
@@ -1439,7 +1420,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     isPaymentConfirming ||
     intentLoading ||
     !hasRequiredParams ||
-    (writeConnectorReady && !isWrongNetwork && (tokenConfigInvalid || !!tokenAddressConfigError || hasDiagnosticsError || !hasEnoughBalance));
+    (writeConnectorReady && !isWrongNetwork && (hasBlockingPaymentError || !hasEnoughBalance));
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-5 text-slate-950">
@@ -1486,13 +1467,13 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
 
               {isWrongNetwork ? <StatusBox tone="warn" text="Please switch to Mezo." /> : null}
               {legacyMUSDSetupWarning ? <StatusBox tone="warn" text={legacyMUSDSetupWarning} /> : null}
-              {!isWrongNetwork && isConnected && (tokenConfigInvalid || tokenAddressConfigError || hasDiagnosticsError) ? (
+              {!isWrongNetwork && isConnected && hasBlockingPaymentError ? (
                 <StatusBox tone="error" text={tokenDiagnostics.exactErrorMessage || tokenAddressConfigError || 'Token diagnostics failed.'} />
               ) : null}
               {!isWrongNetwork && isConnected && !tokenConfigInvalid && !tokenAddressConfigError && balance != null && !hasEnoughBalance ? <StatusBox tone="error" text="Insufficient MUSD balance." /> : null}
               
                {/* Payment Mode Indicator — always EIP-712 one-click */}
-              {!isWrongNetwork && isConnected && !tokenConfigInvalid && !tokenAddressConfigError && !hasDiagnosticsError && (
+              {!isWrongNetwork && isConnected && !tokenConfigInvalid && !tokenAddressConfigError && (paymentMode === 'direct_transfer' || !hasDiagnosticsError) && (
                 <div className={`mb-2 rounded-2xl p-3 text-sm font-bold ${paymentMode === 'direct_transfer' ? 'bg-sky-50 text-sky-800' : 'bg-emerald-50 text-emerald-700'}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
