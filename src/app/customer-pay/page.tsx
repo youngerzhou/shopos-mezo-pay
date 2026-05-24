@@ -78,6 +78,13 @@ const erc20Abi = [
 
 const shoposPaymentAbi = [
   {
+    name: 'musd',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }]
+  },
+  {
     name: 'payOrder',
     type: 'function',
     stateMutability: 'nonpayable',
@@ -113,14 +120,9 @@ const shoposPaymentAbi = [
 // confirming: wagmi waiting for tx receipt
 // confirmed: tx mined, navigating to success
 // failed: unrecoverable error (user can retry from idle)
-type Step = 'idle' | 'signing_permit' | 'paying' | 'confirming' | 'confirmed' | 'failed';
+type Step = 'idle' | 'signing_permit' | 'simulating' | 'paying' | 'confirming' | 'confirmed' | 'failed';
 
-const permitDomain = {
-  name: 'Mezo USD',
-  version: '1',
-  chainId: 31611,
-  verifyingContract: '0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503' as `0x${string}`
-} as const;
+const PERMIT_VERSION = '1';
 
 const permitTypes = {
   Permit: [
@@ -152,6 +154,8 @@ type TokenDiagnostics = {
   envLegacySepoliaRpcUrl: string;
   musdAddress: string;
   paymentContract: string;
+  contractMusdAddress: string;
+  musdAddressMatch: string;
   merchantWallet: string;
   connectedWallet: string;
   currentChainId: string;
@@ -169,6 +173,17 @@ type TokenDiagnostics = {
   amountInUnits: string;
   hasEnoughBalance: string;
   hasEnoughAllowance: string;
+  permitDomainName: string;
+  permitDomainVersion: string;
+  permitDomainChainId: string;
+  permitDomainVerifyingContract: string;
+  permitOwner: string;
+  permitSpender: string;
+  permitValue: string;
+  permitNonce: string;
+  permitDeadline: string;
+  permitSimulationStatus: string;
+  permitSimulationError: string;
   lastFailedStep: string;
   exactErrorMessage: string;
 };
@@ -181,6 +196,8 @@ const emptyDiagnostics: TokenDiagnostics = {
   envLegacySepoliaRpcUrl: '',
   musdAddress: '',
   paymentContract: '',
+  contractMusdAddress: '',
+  musdAddressMatch: '',
   merchantWallet: '',
   connectedWallet: '',
   currentChainId: '',
@@ -198,6 +215,17 @@ const emptyDiagnostics: TokenDiagnostics = {
   amountInUnits: '',
   hasEnoughBalance: '',
   hasEnoughAllowance: '',
+  permitDomainName: '',
+  permitDomainVersion: '',
+  permitDomainChainId: '',
+  permitDomainVerifyingContract: '',
+  permitOwner: '',
+  permitSpender: '',
+  permitValue: '',
+  permitNonce: '',
+  permitDeadline: '',
+  permitSimulationStatus: '',
+  permitSimulationError: '',
   lastFailedStep: '',
   exactErrorMessage: ''
 };
@@ -245,6 +273,51 @@ function logDebugFailure(step: string, context: Record<string, unknown>, err: an
     ...context,
     ...serializeError(err)
   });
+}
+
+function permitDiagnosticsPayload(input: {
+  owner: string;
+  spender: string;
+  value: bigint;
+  nonce: bigint;
+  deadline: bigint;
+  domain: {
+    name: string;
+    version: string;
+    chainId: number;
+    verifyingContract: string;
+  };
+  musdAddress: string;
+  contractMusdAddress: string;
+  paymentContract: string;
+  merchant: string;
+  paymentIntentIdBytes32: string;
+  orderIdBytes32: string;
+  amount: bigint;
+  chainId?: number;
+  connectedWallet?: string;
+}) {
+  return {
+    owner: input.owner,
+    spender: input.spender,
+    value: input.value.toString(),
+    nonce: input.nonce.toString(),
+    deadline: input.deadline.toString(),
+    domainName: input.domain.name,
+    domainVersion: input.domain.version,
+    domainChainId: String(input.domain.chainId),
+    domainVerifyingContract: input.domain.verifyingContract,
+    resolvedMusdAddress: input.musdAddress,
+    contractMusdAddress: input.contractMusdAddress,
+    paymentContract: input.paymentContract,
+    merchant: input.merchant,
+    paymentIntentIdBytes32: input.paymentIntentIdBytes32,
+    orderIdBytes32: input.orderIdBytes32,
+    txAmount: input.amount.toString(),
+    valueMatchesTxAmount: input.value === input.amount ? 'yes' : 'no',
+    chainId: input.chainId?.toString() || '-',
+    connectedWallet: input.connectedWallet || '-'
+  };
 }
 
 function metricValue(value: number | null, invalid: boolean) {
@@ -536,6 +609,38 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         return;
       }
 
+      let contractMusdAddress: string;
+      try {
+        contractMusdAddress = String(await publicClient.readContract({
+          address: paymentContract as `0x${string}`,
+          abi: shoposPaymentAbi,
+          functionName: 'musd'
+        }));
+        const musdAddressMatch = sameAddress(contractMusdAddress, musdAddress) ? 'yes' : 'no';
+        setPartialDiagnostics({ contractMusdAddress, musdAddressMatch });
+        if (musdAddressMatch !== 'yes') {
+          const message = `MUSD address mismatch. Frontend resolved ${musdAddress}, but ShopOSPayment.musd() is ${contractMusdAddress}. Payment is blocked before wallet signing.`;
+          setTokenConfigInvalid(true);
+          failStep('checkShopOSPaymentMusd', message, { ...nextDiagnostics, contractMusdAddress, musdAddressMatch });
+          logDebugFailure('checkShopOSPaymentMusd', {
+            frontendMusdAddress: musdAddress,
+            contractMusdAddress,
+            paymentContract,
+            chainId,
+            functionName: 'musd',
+            args: []
+          }, new Error(message));
+          return;
+        }
+        logDebugSuccess('checkShopOSPaymentMusd', contractMusdAddress);
+      } catch (err: any) {
+        const message = `ShopOSPayment.musd() read failed: ${getErrorMessage(err)}`;
+        setTokenConfigInvalid(true);
+        failStep('checkShopOSPaymentMusd', message, nextDiagnostics);
+        logDebugFailure('checkShopOSPaymentMusd', { paymentContract, chainId, functionName: 'musd', args: [] }, err);
+        return;
+      }
+
       let bytecode: `0x${string}` | undefined;
       try {
         bytecode = await publicClient.getCode({ address: musdAddress as `0x${string}` });
@@ -645,6 +750,12 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
           functionName: 'name'
         });
         setTokenName(String(nameResult || 'MUSD Token'));
+        setPartialDiagnostics({
+          permitDomainName: String(nameResult || 'MUSD Token'),
+          permitDomainVersion: PERMIT_VERSION,
+          permitDomainChainId: String(mezoTestnet.id),
+          permitDomainVerifyingContract: musdAddress
+        });
 
         const nonceResult = await publicClient.readContract({
           address: musdAddress as `0x${string}`,
@@ -709,7 +820,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   const hasEnoughAllowance = tokenDiagnostics.hasEnoughAllowance === 'yes';
 
   useEffect(() => {
-    if (isPaymentConfirmed && (step === 'paying' || step === 'confirming')) {
+    if (isPaymentConfirmed && (step === 'paying' || step === 'simulating' || step === 'confirming')) {
       setStep('confirmed');
     }
   }, [isPaymentConfirmed, step]);
@@ -804,7 +915,79 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     }
 
     try {
-      // Step 1: Fetch nonce ALWAYS fresh from chain
+      if (!publicClient) {
+        setError('Public client is unavailable.');
+        setStep('failed');
+        return;
+      }
+
+      // Step 0: Hard-block any token/payment contract mismatch before wallet signing.
+      let contractMusdAddress: string;
+      try {
+        contractMusdAddress = String(await publicClient.readContract({
+          address: paymentContract as `0x${string}`,
+          abi: shoposPaymentAbi,
+          functionName: 'musd'
+        }));
+        const musdAddressMatch = sameAddress(contractMusdAddress, musdAddress);
+        setTokenDiagnostics((current) => ({
+          ...current,
+          contractMusdAddress,
+          musdAddressMatch: musdAddressMatch ? 'yes' : 'no',
+          lastFailedStep: musdAddressMatch ? current.lastFailedStep : 'checkShopOSPaymentMusd',
+          exactErrorMessage: musdAddressMatch ? current.exactErrorMessage : `MUSD address mismatch. Frontend resolved ${musdAddress}, but ShopOSPayment.musd() is ${contractMusdAddress}. Payment is blocked before wallet signing.`
+        }));
+        if (!musdAddressMatch) {
+          const message = `MUSD address mismatch. Frontend resolved ${musdAddress}, but ShopOSPayment.musd() is ${contractMusdAddress}. Payment is blocked before wallet signing.`;
+          console.error('[PayAndSign] Blocking payment because ShopOSPayment.musd() does not match frontend MUSD address.', {
+            frontendMusdAddress: musdAddress,
+            contractMusdAddress,
+            paymentContract,
+            chainId,
+            connectedWallet: address
+          });
+          setTokenConfigInvalid(true);
+          setError(message);
+          setStep('failed');
+          return;
+        }
+      } catch (err: any) {
+        const message = `ShopOSPayment.musd() read failed: ${getErrorMessage(err)}`;
+        console.error('[PayAndSign] Unable to verify ShopOSPayment.musd() before signing.', {
+          paymentContract,
+          chainId,
+          connectedWallet: address,
+          ...serializeError(err)
+        });
+        setTokenConfigInvalid(true);
+        setTokenDiagnostics((current) => ({
+          ...current,
+          lastFailedStep: 'checkShopOSPaymentMusd',
+          exactErrorMessage: message
+        }));
+        setError(message);
+        setStep('failed');
+        return;
+      }
+
+      // Step 1: Fetch token name and nonce ALWAYS fresh from chain.
+      // The EIP-712 domain name must match the token contract exactly.
+      let currentTokenName: string;
+      try {
+        currentTokenName = String(await publicClient.readContract({
+          address: musdAddress as `0x${string}`,
+          abi: erc20Abi,
+          functionName: 'name'
+        }));
+        setTokenName(currentTokenName);
+      } catch (err: any) {
+        console.error('[PayAndSign] name() read failed:', err);
+        setError(`MUSD token name() read failed: ${getErrorMessage(err)}`);
+        setStep('failed');
+        return;
+      }
+
+      // Step 2: Fetch nonce ALWAYS fresh from chain
       // Never rely on React state - a prior permit would have incremented it.
       let currentNonce: bigint;
       try {
@@ -823,14 +1006,18 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         return;
       }
 
-      // Step 2: EIP-712 Permit signature
+      // Step 3: EIP-712 Permit signature
       // Wallet shows a 'Signature request' - NOT 'Spending cap request'.
-      // CRITICAL: These values are the RPC-verified canonical MUSD EIP-712 domain.
-      // Do not fetch eip712Domain() at click time; some wallets fall back if signing setup throws.
       setStep('signing_permit');
 
       const amountWei = amountInUnits;
       const permitDeadline = BigInt(Math.floor(Date.now() / 1000) + 1800);
+      const dynamicPermitDomain = {
+        name: currentTokenName,
+        version: PERMIT_VERSION,
+        chainId: mezoTestnet.id,
+        verifyingContract: musdAddress as `0x${string}`
+      } as const;
 
       const permitMessage = {
         owner:    address as `0x${string}`,
@@ -840,30 +1027,54 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         deadline: permitDeadline
       } as const;
 
-      // Full debug dump BEFORE signing
-      console.log('[PayAndSign] EIP-712 domain (must match contract EXACTLY):', {
-        name:              permitDomain.name,
-        version:           permitDomain.version,
-        chainId:           permitDomain.chainId,
-        verifyingContract: permitDomain.verifyingContract
-      });
-      console.log('[PayAndSign] Permit message:', {
-        owner:    permitMessage.owner,
-        spender:  permitMessage.spender,
-        value:    amountWei.toString(),
-        nonce:    currentNonce.toString(),
-        deadline: permitDeadline.toString()
-      });
-      console.log('[PayAndSign] Contract addresses:', {
-        musdToken:             musdAddress,
-        shopOSPaymentContract: paymentContract,
+      const corePermitDiagnostics = permitDiagnosticsPayload({
+        owner: permitMessage.owner,
+        spender: permitMessage.spender,
+        value: permitMessage.value,
+        nonce: permitMessage.nonce,
+        deadline: permitMessage.deadline,
+        domain: dynamicPermitDomain,
+        musdAddress,
+        contractMusdAddress,
+        paymentContract,
         merchant,
         paymentIntentIdBytes32,
-        orderIdBytes32
+        orderIdBytes32,
+        amount: amountWei,
+        chainId,
+        connectedWallet: address
       });
 
+      setTokenDiagnostics((current) => ({
+        ...current,
+        contractMusdAddress,
+        musdAddressMatch: 'yes',
+        permitDomainName: dynamicPermitDomain.name,
+        permitDomainVersion: dynamicPermitDomain.version,
+        permitDomainChainId: String(dynamicPermitDomain.chainId),
+        permitDomainVerifyingContract: dynamicPermitDomain.verifyingContract,
+        permitOwner: permitMessage.owner,
+        permitSpender: permitMessage.spender,
+        permitValue: permitMessage.value.toString(),
+        permitNonce: permitMessage.nonce.toString(),
+        permitDeadline: permitMessage.deadline.toString(),
+        permitSimulationStatus: '',
+        permitSimulationError: '',
+        lastFailedStep: '',
+        exactErrorMessage: ''
+      }));
+
+      // Full debug dump BEFORE signing
+      console.log('[PayAndSign] EIP-712 domain (must match contract EXACTLY):', {
+        name:              dynamicPermitDomain.name,
+        version:           dynamicPermitDomain.version,
+        chainId:           dynamicPermitDomain.chainId,
+        verifyingContract: dynamicPermitDomain.verifyingContract
+      });
+      console.log('[PayAndSign] Permit message and 12-point diagnostics:', corePermitDiagnostics);
+
       const signature = await signTypedDataAsync({
-        domain:      permitDomain,
+        domain:      dynamicPermitDomain,
         types:       permitTypes,
         primaryType: 'Permit',
         message:     permitMessage
@@ -883,7 +1094,55 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         signatureLength: signature.length
       });
 
-      // Step 3: Submit on-chain transaction
+      // Step 4: Simulate the exact contract call before asking the wallet to send a tx.
+      // If permit() would revert, we stop here and show diagnostics instead of letting
+      // the wallet fall back into an allowance/spending-cap flow.
+      setStep('simulating');
+      try {
+        await publicClient.simulateContract({
+          account: address as `0x${string}`,
+          address: paymentContract as `0x${string}`,
+          abi: shoposPaymentAbi,
+          functionName: 'payOrderWithPermit',
+          args: [
+            paymentIntentIdBytes32 as `0x${string}`,
+            orderIdBytes32 as `0x${string}`,
+            merchant as `0x${string}`,
+            amountWei,
+            permitDeadline,
+            v,
+            r,
+            s
+          ]
+        });
+        setTokenDiagnostics((current) => ({
+          ...current,
+          permitSimulationStatus: 'pass',
+          permitSimulationError: ''
+        }));
+        console.log('[PayAndSign] payOrderWithPermit simulation passed:', corePermitDiagnostics);
+      } catch (err: any) {
+        const message = `payOrderWithPermit simulation failed before wallet transaction: ${getErrorMessage(err)}`;
+        const simulationDiagnostics = {
+          ...corePermitDiagnostics,
+          functionName: 'payOrderWithPermit',
+          revertReason: getErrorMessage(err),
+          serializedError: serializeError(err)
+        };
+        console.error('[PayAndSign] payOrderWithPermit simulation failed. Wallet transaction blocked.', simulationDiagnostics);
+        setTokenDiagnostics((current) => ({
+          ...current,
+          permitSimulationStatus: 'fail',
+          permitSimulationError: getErrorMessage(err),
+          lastFailedStep: 'simulatePayOrderWithPermit',
+          exactErrorMessage: message
+        }));
+        setError(message);
+        setStep('failed');
+        return;
+      }
+
+      // Step 5: Submit on-chain transaction
       // Single contract call: permit() + transferFrom() executed atomically.
       // Wallet shows 'Transaction request' - NOT a spending cap.
       setStep('paying');
@@ -1043,7 +1302,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   // payOrder() and payOrderWithPermit() replaced by unified payAndSign() above.
 
   const primaryAction = () => {
-    if (step === 'signing_permit' || step === 'paying' || step === 'confirming' || step === 'confirmed') return;
+    if (step === 'signing_permit' || step === 'simulating' || step === 'paying' || step === 'confirming' || step === 'confirmed') return;
     if (!writeConnectorReady) {
       setError('Wallet is not connected. Please open this page in MetaMask or connect with WalletConnect.');
       return connectWallet();
@@ -1065,6 +1324,8 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
           ? 'Insufficient MUSD Balance'
           : step === 'signing_permit'
             ? '✍️ Signing Permit...'
+            : step === 'simulating'
+              ? '🧪 Simulating Payment...'
             : step === 'paying'
               ? '⏳ Submitting Payment...'
               : step === 'confirming'
@@ -1078,6 +1339,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   const disablePrimary =
     loadingBalances ||
     step === 'signing_permit' ||
+    step === 'simulating' ||
     step === 'paying' ||
     step === 'confirming' ||
     step === 'confirmed' ||
@@ -1165,7 +1427,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
                   disabled={disablePrimary}
                   onClick={primaryAction}
                 >
-                  {loadingBalances || step === 'signing_permit' || step === 'paying' || step === 'confirming' || isPaymentConfirming ? (
+                  {loadingBalances || step === 'signing_permit' || step === 'simulating' || step === 'paying' || step === 'confirming' || isPaymentConfirming ? (
                     <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
                     <Wallet className="mr-2 h-4 w-4" />
@@ -1204,6 +1466,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
             <p className="text-sm font-black text-slate-950">Payment Transaction</p>
             <p className="mt-2 break-all rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-600">{paymentTxHash}</p>
             {step === 'paying' ? <StatusBox tone="warn" text="Submitting payment transaction to chain..." /> : null}
+            {step === 'simulating' ? <StatusBox tone="warn" text="Simulating permit payment before opening the wallet transaction..." /> : null}
             {step === 'confirming' || isPaymentConfirming ? <StatusBox tone="warn" text="Waiting for blockchain confirmation..." /> : null}
             {step === 'confirmed' ? <StatusBox tone="success" text="Payment Confirmed ✔" /> : null}
             {(step === 'confirming' || step === 'confirmed' || isPaymentConfirming) ? (
@@ -1235,11 +1498,13 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
             <TraceRow label="2. Wallet chain" status={!isConnected ? 'pending' : isWrongNetwork ? 'fail' : 'pass'} detail={`current=${chainId || '-'}, expected=${mezoTestnet.id}`} />
             <TraceRow label="3. Address wiring" status={tokenAddressConfigError ? 'fail' : musdAddress ? 'pass' : 'fail'} detail={addressCollisionCheck || 'Missing MUSD token address'} />
             <TraceRow label="4. RPC chain" status={!tokenDiagnostics.rpcChainId ? 'pending' : tokenDiagnostics.rpcChainId === String(mezoTestnet.id) ? 'pass' : 'fail'} detail={`rpc=${tokenDiagnostics.rpcChainId || '-'}, expected=${mezoTestnet.id}`} />
-            <TraceRow label="5. Token bytecode" status={tokenDiagnostics.tokenBytecodePresent === 'yes' ? 'pass' : tokenDiagnostics.tokenBytecodePresent === 'no' ? 'fail' : 'pending'} detail={tokenDiagnostics.tokenBytecodePresent} />
-            <TraceRow label="6. symbol()" status={tokenDiagnostics.symbolResult ? 'pass' : tokenDiagnostics.lastFailedStep === 'readSymbol' ? 'fail' : 'pending'} detail={tokenDiagnostics.symbolResult || '-'} />
-            <TraceRow label="7. decimals()" status={tokenDiagnostics.decimalsResult ? 'pass' : tokenDiagnostics.lastFailedStep === 'readDecimals' ? 'fail' : 'pending'} detail={tokenDiagnostics.decimalsResult || '-'} />
-            <TraceRow label="8. balanceOf(customer)" status={tokenDiagnostics.balanceRaw ? 'pass' : tokenDiagnostics.lastFailedStep === 'readBalance' ? 'fail' : 'pending'} detail={tokenDiagnostics.balanceFormatted || tokenDiagnostics.exactErrorMessage || '-'} />
-            <TraceRow label="9. allowance(customer, ShopOSPayment)" status={tokenDiagnostics.allowanceRaw ? 'pass' : tokenDiagnostics.lastFailedStep === 'readAllowance' ? 'fail' : 'pending'} detail={tokenDiagnostics.allowanceFormatted || tokenDiagnostics.exactErrorMessage || '-'} />
+            <TraceRow label="5. ShopOSPayment.musd()" status={tokenDiagnostics.musdAddressMatch === 'yes' ? 'pass' : tokenDiagnostics.musdAddressMatch === 'no' || tokenDiagnostics.lastFailedStep === 'checkShopOSPaymentMusd' ? 'fail' : 'pending'} detail={`contract=${tokenDiagnostics.contractMusdAddress || '-'}, frontend=${musdAddress || '-'}`} />
+            <TraceRow label="6. Token bytecode" status={tokenDiagnostics.tokenBytecodePresent === 'yes' ? 'pass' : tokenDiagnostics.tokenBytecodePresent === 'no' ? 'fail' : 'pending'} detail={tokenDiagnostics.tokenBytecodePresent} />
+            <TraceRow label="7. symbol()" status={tokenDiagnostics.symbolResult ? 'pass' : tokenDiagnostics.lastFailedStep === 'readSymbol' ? 'fail' : 'pending'} detail={tokenDiagnostics.symbolResult || '-'} />
+            <TraceRow label="8. decimals()" status={tokenDiagnostics.decimalsResult ? 'pass' : tokenDiagnostics.lastFailedStep === 'readDecimals' ? 'fail' : 'pending'} detail={tokenDiagnostics.decimalsResult || '-'} />
+            <TraceRow label="9. balanceOf(customer)" status={tokenDiagnostics.balanceRaw ? 'pass' : tokenDiagnostics.lastFailedStep === 'readBalance' ? 'fail' : 'pending'} detail={tokenDiagnostics.balanceFormatted || tokenDiagnostics.exactErrorMessage || '-'} />
+            <TraceRow label="10. allowance(customer, ShopOSPayment)" status={tokenDiagnostics.allowanceRaw ? 'pass' : tokenDiagnostics.lastFailedStep === 'readAllowance' ? 'fail' : 'pending'} detail={tokenDiagnostics.allowanceFormatted || tokenDiagnostics.exactErrorMessage || '-'} />
+            <TraceRow label="11. payOrderWithPermit simulation" status={tokenDiagnostics.permitSimulationStatus === 'pass' ? 'pass' : tokenDiagnostics.permitSimulationStatus === 'fail' ? 'fail' : 'pending'} detail={tokenDiagnostics.permitSimulationError || tokenDiagnostics.permitSimulationStatus || '-'} />
           </div>
         </div>
 
@@ -1254,6 +1519,8 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
             <DebugRow label="NEXT_PUBLIC_SEPOLIA_RPC_URL legacy" value={tokenDiagnostics.envLegacySepoliaRpcUrl || envLegacySepoliaRpcUrl || '-'} />
             <DebugRow label="resolved MUSD token address" value={tokenDiagnostics.musdAddress || musdAddress || '-'} />
             <DebugRow label="ShopOSPayment contract address" value={tokenDiagnostics.paymentContract || paymentContract || '-'} />
+            <DebugRow label="ShopOSPayment.musd()" value={tokenDiagnostics.contractMusdAddress || '-'} />
+            <DebugRow label="MUSD address match" value={tokenDiagnostics.musdAddressMatch || '-'} />
             <DebugRow label="merchant wallet" value={tokenDiagnostics.merchantWallet || merchant || '-'} />
             <DebugRow label="connected wallet" value={tokenDiagnostics.connectedWallet || address || '-'} />
             <DebugRow label="current chainId" value={tokenDiagnostics.currentChainId || chainId?.toString() || '-'} />
@@ -1280,6 +1547,17 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
             <DebugRow label="amountInUnits" value={tokenDiagnostics.amountInUnits || amountInUnits.toString()} />
             <DebugRow label="has enough balance" value={tokenDiagnostics.hasEnoughBalance || '-'} />
             <DebugRow label="has enough allowance" value={tokenDiagnostics.hasEnoughAllowance || '-'} />
+            <DebugRow label="permit domain name" value={tokenDiagnostics.permitDomainName || tokenName || '-'} />
+            <DebugRow label="permit domain version" value={tokenDiagnostics.permitDomainVersion || PERMIT_VERSION} />
+            <DebugRow label="permit domain chainId" value={tokenDiagnostics.permitDomainChainId || String(mezoTestnet.id)} />
+            <DebugRow label="permit verifyingContract" value={tokenDiagnostics.permitDomainVerifyingContract || musdAddress || '-'} />
+            <DebugRow label="permit owner" value={tokenDiagnostics.permitOwner || address || '-'} />
+            <DebugRow label="permit spender" value={tokenDiagnostics.permitSpender || paymentContract || '-'} />
+            <DebugRow label="permit value" value={tokenDiagnostics.permitValue || '-'} />
+            <DebugRow label="permit nonce" value={tokenDiagnostics.permitNonce || nonce?.toString() || '-'} />
+            <DebugRow label="permit deadline" value={tokenDiagnostics.permitDeadline || '-'} />
+            <DebugRow label="permit simulation" value={tokenDiagnostics.permitSimulationStatus || '-'} />
+            <DebugRow label="permit simulation error" value={tokenDiagnostics.permitSimulationError || '-'} />
             <DebugRow label="last failed step" value={tokenDiagnostics.lastFailedStep || '-'} />
             <DebugRow label="exact error message" value={tokenDiagnostics.exactErrorMessage || '-'} />
             <DebugRow label="payment method" value="ShopOSPayment.payOrderWithPermit() — EIP-712 permit + transferFrom atomic" />

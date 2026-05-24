@@ -113,6 +113,7 @@ export default function CustomerPaymentSuccessPage() {
   const [error, setError] = useState('');
   const [couponState, setCouponState] = useState<CouponClaimState>('idle');
   const [couponMessage, setCouponMessage] = useState('');
+  const [autoClaimAttempted, setAutoClaimAttempted] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,20 +146,18 @@ export default function CustomerPaymentSuccessPage() {
   const memberReferralId = member?.referralId || member?.referral_id || '';
   // Auto-identify the customer: prefer stored referralId, fall back to payer wallet or connected wallet
   const payerWallet = intent?.payerWallet || connectedWallet || '';
+  const couponIdentity = memberReferralId
+    ? { referral_id: memberReferralId }
+    : payerWallet
+      ? { wallet: payerWallet }
+      : null;
 
   const backToStoreHref = memberReferralId
     ? `/customer/shop?referral_id=${encodeURIComponent(memberReferralId)}`
     : '/customer/shop';
 
   const claimCoupon = async () => {
-    // Determine identity — never ask the user to input anything
-    const identity = memberReferralId
-      ? { referral_id: memberReferralId }
-      : payerWallet
-        ? { wallet: payerWallet }
-        : null;
-
-    if (!identity) {
+    if (!couponIdentity) {
       setCouponState('error');
       setCouponMessage('Unable to identify your account. Please contact staff.');
       return;
@@ -170,7 +169,7 @@ export default function CustomerPaymentSuccessPage() {
       const res = await fetch('/api/customers/coupons/campaign/next-purchase-reward', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(identity)
+        body: JSON.stringify(couponIdentity)
       });
       const data = await res.json();
 
@@ -189,6 +188,12 @@ export default function CustomerPaymentSuccessPage() {
       setCouponMessage(err.message || 'Unable to claim coupon.');
     }
   };
+
+  useEffect(() => {
+    if (loading || error || autoClaimAttempted || couponState !== 'idle' || !couponIdentity) return;
+    setAutoClaimAttempted(true);
+    claimCoupon();
+  }, [autoClaimAttempted, couponIdentity, couponState, error, loading]);
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-950">
@@ -284,7 +289,7 @@ export default function CustomerPaymentSuccessPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-black text-orange-950">
-                    {couponState === 'claimed' ? 'Coupon Claimed!' : couponState === 'already_claimed' ? 'Coupon Already in Wallet' : 'Claim Your Next Coupon'}
+                    {couponState === 'claiming' ? 'Claiming Your Next Coupon...' : couponState === 'claimed' ? 'Coupon Claimed!' : couponState === 'already_claimed' ? 'Coupon Already in Wallet' : 'Claim Your Next Coupon'}
                   </p>
                   <p className="mt-1 text-xs font-bold text-orange-800">
                     Save 3.00 MUSD on your next order over 50.00 MUSD.
@@ -306,7 +311,7 @@ export default function CustomerPaymentSuccessPage() {
                 </div>
               ) : null}
 
-              {/* Show claim button only while not yet successfully claimed */}
+              {/* Auto-claim runs when the receipt can identify the customer; this button is only a retry fallback. */}
               {couponState !== 'claimed' && couponState !== 'already_claimed' ? (
                 <Button
                   id="claim-coupon-btn"
