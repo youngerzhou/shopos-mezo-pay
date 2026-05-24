@@ -1,4 +1,4 @@
-import { PackageSearch, QrCode, ScanLine, User, UserCheck, Wallet } from 'lucide-react';
+import { PackageSearch, QrCode, RefreshCw, ScanLine, User, UserCheck, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
