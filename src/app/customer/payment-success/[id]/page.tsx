@@ -52,6 +52,7 @@ type PaymentIntentReceipt = {
 };
 
 type CouponClaimState = 'idle' | 'claiming' | 'claimed' | 'already_claimed' | 'error';
+const MEMBER_STORAGE_KEY = 'shopos.customer.referral_id';
 
 const FALLBACK_PRODUCT_IMAGE = `data:image/svg+xml,${encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
@@ -194,6 +195,12 @@ export default function CustomerPaymentSuccessPage() {
     setAutoClaimAttempted(true);
     claimCoupon();
   }, [autoClaimAttempted, couponIdentity, couponState, error, loading]);
+
+  useEffect(() => {
+    if (loading || error || typeof window === 'undefined') return;
+    window.sessionStorage.removeItem(MEMBER_STORAGE_KEY);
+    window.localStorage.removeItem(MEMBER_STORAGE_KEY);
+  }, [error, loading]);
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-950">

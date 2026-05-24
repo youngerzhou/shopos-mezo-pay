@@ -31,6 +31,8 @@ type Coupon = {
   minimum_spend: number;
 };
 
+const MEMBER_STORAGE_KEY = 'shopos.customer.referral_id';
+
 function money(value: number) {
   return `${roundMoney2(value).toFixed(2)} MUSD`;
 }
@@ -38,7 +40,9 @@ function money(value: number) {
 export default function CustomerShopPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const referralId = searchParams.get('referral_id') || '';
+  const referralIdFromUrl = searchParams.get('referral_id') || '';
+  const [restoredReferralId, setRestoredReferralId] = useState('');
+  const referralId = referralIdFromUrl || restoredReferralId;
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
@@ -54,6 +58,27 @@ export default function CustomerShopPage() {
   const selectedCoupon = coupons.find((coupon) => coupon.id === selectedCouponId && subtotal >= Number(coupon.minimum_spend || 0)) || null;
   const couponDiscount = selectedCoupon ? Math.min(Number(selectedCoupon.discount_amount || 0), subtotal) : 0;
   const total = roundMoney2(Math.max(subtotal - couponDiscount, 0));
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const normalizedFromUrl = referralIdFromUrl.trim();
+    if (normalizedFromUrl) {
+      window.localStorage.setItem(MEMBER_STORAGE_KEY, normalizedFromUrl);
+      window.sessionStorage.setItem(MEMBER_STORAGE_KEY, normalizedFromUrl);
+      setRestoredReferralId(normalizedFromUrl);
+      return;
+    }
+
+    const savedReferralId = window.sessionStorage.getItem(MEMBER_STORAGE_KEY) ||
+      window.localStorage.getItem(MEMBER_STORAGE_KEY) ||
+      '';
+    if (savedReferralId) {
+      setRestoredReferralId(savedReferralId);
+      const nextParams = new URLSearchParams(searchParams.toString());
+      nextParams.set('referral_id', savedReferralId);
+      router.replace(`/customer/shop?${nextParams.toString()}`);
+    }
+  }, [referralIdFromUrl, router, searchParams]);
 
   useEffect(() => {
     async function loadProducts() {
@@ -127,6 +152,10 @@ export default function CustomerShopPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Unable to create order');
+      if (mode === 'pay_at_counter' && typeof window !== 'undefined') {
+        window.sessionStorage.removeItem(MEMBER_STORAGE_KEY);
+        window.localStorage.removeItem(MEMBER_STORAGE_KEY);
+      }
       if (mode === 'pay_online' && data.paymentUrl) {
         router.push(data.paymentUrl);
         return;
@@ -140,12 +169,12 @@ export default function CustomerShopPage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-950">
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur">
+    <main className="flex h-[100dvh] flex-col overflow-hidden bg-slate-50 text-slate-950">
+      <header className="shrink-0 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
           <div>
             <p className="text-xs font-black uppercase tracking-widest text-orange-700">ShopOS Mezo</p>
-            <h1 className="text-2xl font-black tracking-tight">Self-Service Pickup Order</h1>
+            <h1 className="text-xl font-black tracking-tight sm:text-2xl">Self-Service Pickup Order</h1>
           </div>
           <div className="rounded-lg bg-slate-100 px-3 py-2 text-right text-xs font-black text-slate-600">
             Member<br /><span className="text-slate-950">{referralId || 'Missing'}</span>
@@ -153,8 +182,8 @@ export default function CustomerShopPage() {
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-6xl gap-5 px-4 py-5 lg:grid-cols-[1fr_360px]">
-        <section>
+      <div className="mx-auto grid min-h-0 w-full max-w-6xl flex-1 gap-4 px-4 py-4 lg:grid-cols-[1fr_360px]">
+        <section className="min-h-0 overflow-y-auto pb-56 pr-0 lg:pb-4 lg:pr-2">
           {loading ? (
             <div className="rounded-lg border border-slate-200 bg-white p-8 text-center font-bold text-slate-500">Loading products...</div>
           ) : error ? (
@@ -204,7 +233,7 @@ export default function CustomerShopPage() {
           )}
         </section>
 
-        <aside className="h-fit rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-24">
+        <aside className="fixed inset-x-0 bottom-0 z-20 max-h-[48dvh] overflow-y-auto rounded-t-2xl border border-slate-200 bg-white p-4 shadow-[0_-8px_30px_rgba(15,23,42,0.12)] lg:static lg:max-h-none lg:h-fit lg:rounded-lg lg:shadow-sm">
           <h2 className="text-lg font-black">Checkout</h2>
           <div className="mt-4 space-y-3">
             {cart.length === 0 ? (
