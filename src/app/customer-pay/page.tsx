@@ -115,6 +115,23 @@ const shoposPaymentAbi = [
 // failed: unrecoverable error (user can retry from idle)
 type Step = 'idle' | 'signing_permit' | 'paying' | 'confirming' | 'confirmed' | 'failed';
 
+const permitDomain = {
+  name: 'Mezo USD',
+  version: '1',
+  chainId: 31611,
+  verifyingContract: '0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503' as `0x${string}`
+} as const;
+
+const permitTypes = {
+  Permit: [
+    { name: 'owner', type: 'address' },
+    { name: 'spender', type: 'address' },
+    { name: 'value', type: 'uint256' },
+    { name: 'nonce', type: 'uint256' },
+    { name: 'deadline', type: 'uint256' }
+  ]
+} as const;
+
 type PaymentIntentDetails = {
   id: string;
   orderId: string;
@@ -809,69 +826,20 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
 
       // Step 2: EIP-712 Permit signature
       // Wallet shows a 'Signature request' - NOT 'Spending cap request'.
-      // CRITICAL: domain.name MUST exactly match the contract's stored value.
-      // On-chain verified via eip712Domain():
-      //   name='Mezo USD' (NOT 'MUSD' or 'MUSD Token'), version='1', chainId=31611
+      // CRITICAL: These values are the RPC-verified canonical MUSD EIP-712 domain.
+      // Do not fetch eip712Domain() at click time; some wallets fall back if signing setup throws.
       setStep('signing_permit');
 
-      const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
-
-      // Always query eip712Domain() from chain - never trust tokenName React state
-      // which may still be the default 'MUSD Token' if loadTokenState() is in-flight.
-      let domainName = 'Mezo USD';   // on-chain verified fallback
-      let domainVersion = '1';       // on-chain verified fallback
-      try {
-        const eip712DomainAbi = [{
-          name: 'eip712Domain',
-          type: 'function',
-          stateMutability: 'view',
-          inputs: [],
-          outputs: [
-            { name: 'fields',            type: 'bytes1' },
-            { name: 'name',              type: 'string' },
-            { name: 'version',           type: 'string' },
-            { name: 'chainId',           type: 'uint256' },
-            { name: 'verifyingContract', type: 'address' },
-            { name: 'salt',              type: 'bytes32' },
-            { name: 'extensions',        type: 'uint256[]' }
-          ]
-        }] as const;
-        const [, onChainName, onChainVersion] = await publicClient!.readContract({
-          address: musdAddress as `0x${string}`,
-          abi: eip712DomainAbi,
-          functionName: 'eip712Domain'
-        });
-        domainName = onChainName;
-        domainVersion = onChainVersion;
-        console.log('[PayAndSign] eip712Domain() from chain:', { domainName, domainVersion });
-      } catch (err) {
-        console.warn('[PayAndSign] eip712Domain() not available, using hardcoded verified fallback:', { domainName, domainVersion });
-      }
-
-      const permitDomain = {
-        name:              domainName,
-        version:           domainVersion,
-        chainId:           mezoTestnet.id,
-        verifyingContract: musdAddress as `0x${string}`
-      };
-
-      const permitTypes = {
-        Permit: [
-          { name: 'owner',    type: 'address' },
-          { name: 'spender',  type: 'address' },
-          { name: 'value',    type: 'uint256' },
-          { name: 'nonce',    type: 'uint256' },
-          { name: 'deadline', type: 'uint256' }
-        ]
-      };
+      const amountWei = amountInUnits;
+      const permitDeadline = BigInt(Math.floor(Date.now() / 1000) + 1800);
 
       const permitMessage = {
         owner:    address as `0x${string}`,
         spender:  paymentContract as `0x${string}`,
-        value:    amountInUnits,
+        value:    amountWei,
         nonce:    currentNonce,
-        deadline
-      };
+        deadline: permitDeadline
+      } as const;
 
       // Full debug dump BEFORE signing
       console.log('[PayAndSign] EIP-712 domain (must match contract EXACTLY):', {
@@ -883,9 +851,9 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
       console.log('[PayAndSign] Permit message:', {
         owner:    permitMessage.owner,
         spender:  permitMessage.spender,
-        value:    amountInUnits.toString(),
+        value:    amountWei.toString(),
         nonce:    currentNonce.toString(),
-        deadline: deadline.toString()
+        deadline: permitDeadline.toString()
       });
       console.log('[PayAndSign] Contract addresses:', {
         musdToken:             musdAddress,
@@ -926,8 +894,8 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         paymentIntentIdBytes32,
         orderIdBytes32,
         merchant,
-        amount:              amountInUnits.toString(),
-        deadline:            deadline.toString(),
+        amount:              amountWei.toString(),
+        deadline:            permitDeadline.toString(),
         v, r, s
       });
 
@@ -939,8 +907,8 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
           paymentIntentIdBytes32 as `0x${string}`,
           orderIdBytes32 as `0x${string}`,
           merchant as `0x${string}`,
-          amountInUnits,
-          deadline,
+          amountWei,
+          permitDeadline,
           v,
           r,
           s
