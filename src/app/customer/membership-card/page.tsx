@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Contract, BrowserProvider, MaxUint256, formatUnits } from 'ethers';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -53,6 +53,7 @@ function getEthereumProvider() {
 }
 
 function MembershipCardContent() {
+    const router = useRouter();
     const searchParams = useSearchParams();
     const referralId = searchParams?.get('referral_id') || searchParams?.get('referralId');
     const [member, setMember] = useState<any>(null);
@@ -360,7 +361,7 @@ function MembershipCardContent() {
                     </div>
                     <Button
                         variant="outline"
-                        onClick={() => window.location.href = '/'}
+                        onClick={() => router.push('/')}
                     >
                         Back to Shop
                     </Button>
@@ -560,7 +561,7 @@ function MembershipCardContent() {
                             {member?.referral_id ? (
                                 <Button
                                     className="h-14 w-full rounded-2xl font-black"
-                                    onClick={() => window.location.href = `/customer/shop?referral_id=${encodeURIComponent(member.referral_id)}`}
+                                    onClick={() => router.push(`/customer/shop?referral_id=${encodeURIComponent(member.referral_id)}`)}
                                 >
                                     Start Shopping / Shop Now
                                 </Button>

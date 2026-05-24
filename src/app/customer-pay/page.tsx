@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, Copy, ExternalLink, RefreshCw, Wallet } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Copy, RefreshCw, Wallet } from 'lucide-react';
 import { parseUnits, formatUnits } from 'viem';
 import {
   useAccount,
@@ -741,8 +741,8 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         if (cancelled) return;
 
         if (data?.status === 'confirmed') {
-          // Backend confirmed — navigate to success
-          router.replace(successPath);
+          // Backend confirmed — navigate to success in the current app tab.
+          router.push(successPath);
         } else if (data?.status === 'pending') {
           // Backend is still indexing (e.g. RPC propagation lag).
           // Goldsky webhook will confirm asynchronously. Stay on confirmed UI, no error.
@@ -755,13 +755,13 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
             error: data?.error,
             txHash: paymentTxHash
           });
-          router.replace(successPath);
+          router.push(successPath);
         }
       } catch (err: any) {
         if (cancelled) return;
         // Network error calling submit-tx — tx confirmed on-chain, navigate to success.
         console.error('[submit-tx] Network error (tx confirmed on-chain):', err?.message);
-        router.replace(successPath);
+        router.push(successPath);
       }
     }
 
@@ -962,7 +962,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     }
   };
 
-  const openInMetaMask = () => {
+  const copyMetaMaskLink = async () => {
     const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
     if (!currentUrl || !currentUrl.startsWith('http')) {
       setError('Invalid payment page URL');
@@ -982,7 +982,13 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
       deeplink: metamaskDeepLink,
       currentUrl
     });
-    window.location.href = metamaskDeepLink;
+    try {
+      await navigator.clipboard.writeText(metamaskDeepLink);
+      setCopiedPaymentLink(true);
+      window.setTimeout(() => setCopiedPaymentLink(false), 1500);
+    } catch {
+      setError('Unable to copy MetaMask link.');
+    }
   };
 
   const copyPaymentLink = async () => {
@@ -1099,9 +1105,9 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
                   <p className="mt-2 text-sm font-bold text-orange-800">
                     This browser cannot sign blockchain transactions directly. Please open this payment page in a wallet app.
                   </p>
-                  <Button className="mt-4 h-11 w-full rounded-xl bg-orange-600 text-sm font-black text-white hover:bg-red-950" onClick={openInMetaMask} type="button">
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    Open in MetaMask
+                  <Button className="mt-4 h-11 w-full rounded-xl bg-orange-600 text-sm font-black text-white hover:bg-red-950" onClick={copyMetaMaskLink} type="button">
+                    <Copy className="mr-2 h-4 w-4" />
+                    {copiedPaymentLink ? 'Copied' : 'Copy MetaMask link'}
                   </Button>
                   {paymentPageUrl ? (
                     <p className="mt-3 break-all rounded-xl bg-white p-3 text-xs font-bold text-slate-600">
