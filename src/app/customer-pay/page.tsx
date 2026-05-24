@@ -107,7 +107,7 @@ const shoposPaymentAbi = [
   }
 ] as const;
 
-type Step = 'idle' | 'approving' | 'paying' | 'submitted' | 'confirmed';
+type Step = 'idle' | 'signing' | 'paying' | 'submitted' | 'confirmed';
 
 type PaymentIntentDetails = {
   id: string;
@@ -246,11 +246,9 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   const [tokenSymbol, setTokenSymbol] = useState('');
   const [tokenConfigInvalid, setTokenConfigInvalid] = useState(false);
   const [step, setStep] = useState<Step>('idle');
-  const [approvalTxHash, setApprovalTxHash] = useState<`0x${string}` | undefined>();
   const [paymentTxHash, setPaymentTxHash] = useState<`0x${string}` | undefined>();
   const [error, setError] = useState('');
   const [loadingBalances, setLoadingBalances] = useState(false);
-  const [needsApproval, setNeedsApproval] = useState(false);
   const [nonce, setNonce] = useState<bigint | null>(null);
   const [tokenName, setTokenName] = useState<string>('MUSD Token');
   const [isPermitSupported, setIsPermitSupported] = useState(false);
@@ -370,10 +368,6 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
       return 0n;
     }
   }, [amount, decimals]);
-
-  const { isLoading: isApprovalConfirming, isSuccess: isApprovalConfirmed } = useWaitForTransactionReceipt({
-    hash: approvalTxHash
-  });
 
   const { isLoading: isPaymentConfirming, isSuccess: isPaymentConfirmed } = useWaitForTransactionReceipt({
     hash: paymentTxHash
@@ -647,7 +641,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
 
       const enoughBalance = rawBalanceResult >= amountUnits;
       const enoughAllowance = rawAllowanceResult >= amountUnits;
-      setNeedsApproval(!enoughAllowance);
+      // needsApproval is diagnostic only — permit path never uses approve()
       setPartialDiagnostics({
         hasEnoughBalance: enoughBalance ? 'yes' : 'no',
         hasEnoughAllowance: enoughAllowance ? 'yes' : 'no',
@@ -701,10 +695,20 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   }, [isPaymentConfirmed, step]);
 
   useEffect(() => {
+    // Only fires after wagmi has confirmed the tx on-chain (isPaymentConfirmed = true).
+    // At this point money has moved. We call submit-tx to trigger backend indexing,
+    // but NEVER show 'Payment failed' based on its response — the tx is already mined.
     if (!isPaymentConfirmed || !paymentTxHash || !paymentIntentId) return;
     let cancelled = false;
 
     async function submitPaymentTx() {
+      const successQuery = orderId.startsWith('pos_')
+        ? new URLSearchParams({ status: 'paid', paymentIntentId, txHash: String(paymentTxHash) })
+        : new URLSearchParams({ status: 'paid', orderId, txHash: String(paymentTxHash) });
+      const successPath = orderId.startsWith('pos_')
+        ? `/customer/order/${encodeURIComponent(orderId)}/pickup?${successQuery.toString()}`
+        : `/customer/payment-success/${encodeURIComponent(paymentIntentId)}?${successQuery.toString()}`;
+
       try {
         const res = await fetch(`/api/payment-intents/${encodeURIComponent(paymentIntentId)}/submit-tx`, {
           method: 'POST',
@@ -712,27 +716,31 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
           body: JSON.stringify({ txHash: paymentTxHash })
         });
         const data = await res.json();
-        if (!res.ok && !cancelled) {
-          setError(data?.error || 'Payment failed');
-          return;
-        }
-        if (!cancelled && data?.status === 'confirmed' && orderId.startsWith('pos_')) {
-          const query = new URLSearchParams({
-            status: 'paid',
-            paymentIntentId,
-            txHash: String(paymentTxHash)
+
+        if (cancelled) return;
+
+        if (data?.status === 'confirmed') {
+          // Backend confirmed — navigate to success
+          router.replace(successPath);
+        } else if (data?.status === 'pending') {
+          // Backend is still indexing (e.g. RPC propagation lag).
+          // Goldsky webhook will confirm asynchronously. Stay on confirmed UI, no error.
+          console.log('[submit-tx] Payment pending backend indexing — Goldsky webhook will confirm.', { txHash: paymentTxHash });
+        } else {
+          // Backend returned an error, but the tx IS confirmed on-chain.
+          // Log it for debugging, then navigate to success anyway.
+          console.error('[submit-tx] Backend indexing failed (tx confirmed on-chain):', {
+            status: res.status,
+            error: data?.error,
+            txHash: paymentTxHash
           });
-          router.replace(`/customer/order/${encodeURIComponent(orderId)}/pickup?${query.toString()}`);
-        } else if (!cancelled && data?.status === 'confirmed') {
-          const query = new URLSearchParams({
-            status: 'paid',
-            orderId,
-            txHash: String(paymentTxHash)
-          });
-          router.replace(`/customer/payment-success/${encodeURIComponent(paymentIntentId)}?${query.toString()}`);
+          router.replace(successPath);
         }
       } catch (err: any) {
-        if (!cancelled) setError(err.message || 'Payment failed');
+        if (cancelled) return;
+        // Network error calling submit-tx — tx confirmed on-chain, navigate to success.
+        console.error('[submit-tx] Network error (tx confirmed on-chain):', err?.message);
+        router.replace(successPath);
       }
     }
 
@@ -741,18 +749,6 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
       cancelled = true;
     };
   }, [isPaymentConfirmed, orderId, paymentIntentId, paymentTxHash, router]);
-
-  useEffect(() => {
-    if (isApprovalConfirmed) {
-      loadTokenState();
-    }
-  }, [isApprovalConfirmed, loadTokenState]);
-
-  useEffect(() => {
-    if (hasEnoughAllowance && step === 'approving') {
-      setStep('idle');
-    }
-  }, [hasEnoughAllowance, step]);
 
   const connectWallet = (show?: () => void) => {
     // Use ConnectKit modal to show wallet selector (same as register page)
@@ -844,49 +840,9 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     return false;
   };
 
-  const approveMusd = async () => {
-    setError('');
-    setLastWriteError('');
-    if (!requireWriteConnector()) return;
-    if (missingEnv.length > 0) {
-      setError(`Missing environment configuration: ${missingEnv.join(', ')}.`);
-      return;
-    }
-    if (tokenConfigInvalid || tokenAddressConfigError) {
-      setError(tokenDiagnostics.exactErrorMessage || tokenAddressConfigError || 'Token diagnostics failed. Run diagnostics for details.');
-      return;
-    }
-    if (!hasEnoughBalance) {
-      setError('Insufficient MUSD balance.');
-      return;
-    }
-
-    try {
-      setStep('approving');
-      // QR Contract Payment Mode 2: Approve ShopOSPayment contract to spend MUSD
-      // This is NOT Fast Pay allowance - this is one-time approval for this specific payment
-      const hash = await writeContractAsync({
-        address: musdAddress as `0x${string}`,
-        abi: erc20Abi,
-        functionName: 'approve',
-        args: [paymentContract as `0x${string}`, amountInUnits]
-      });
-      setApprovalTxHash(hash);
-      
-      console.log('[CustomerPay] Approval transaction submitted:', {
-        paymentMode: 'qr-contract-payment-mode-2',
-        tokenAddress: musdAddress,
-        spenderContract: paymentContract,
-        amount: amountInUnits.toString(),
-        txHash: hash,
-      });
-    } catch (err: any) {
-      setStep('idle');
-      const message = err.message?.toLowerCase().includes('rejected') ? 'Payment cancelled by user' : err.message || 'Payment failed';
-      setLastWriteError(message);
-      setError(message);
-    }
-  };
+  // approveMusd() intentionally removed.
+  // The EIP-712 permit path (payOrderWithPermit) handles authorization inline
+  // inside the contract call — no on-chain approve() step is ever needed.
 
   const payOrder = async () => {
     setError('');
@@ -953,6 +909,8 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     setError('');
     setLastWriteError('');
     if (!requireWriteConnector()) return;
+    // Nonce must be loaded — this is part of the EIP-712 Permit signature domain
+    // If nonce is null, loadTokenState() didn't complete yet (unlikely but guard anyway)
     if (missingEnv.length > 0) {
       setError(`Missing environment configuration: ${missingEnv.join(', ')}.`);
       return;
@@ -971,7 +929,8 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     }
 
     try {
-      setStep('paying');
+      // Step 1: EIP-712 off-chain signature (free — no gas, no "Spending cap" dialog)
+      setStep('signing');
 
       // 1. Calculate permit parameters
       // Set deadline to 1 hour from now
@@ -1014,12 +973,15 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
 
       console.log('[CustomerPayPermit] Signature received:', signature);
 
+      // Step 2: On-chain tx (one wallet popup — Transaction request, not Spending cap)
+      setStep('paying');
+
       // Parse signature into v, r, s
       const r = signature.slice(0, 66) as `0x${string}`;
       const s = `0x${signature.slice(66, 130)}` as `0x${string}`;
       const v = parseInt(signature.slice(130, 132), 16);
 
-      // 3. Call ShopOSPayment.payOrderWithPermit()
+      // 3. Call ShopOSPayment.payOrderWithPermit() — executes permit + transferFrom atomically
       const hash = await writeContractAsync({
         address: paymentContract as `0x${string}`,
         abi: shoposPaymentAbi,
@@ -1061,15 +1023,16 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     if (isWrongNetwork) return switchToMezo();
     if (tokenConfigInvalid || tokenAddressConfigError || hasDiagnosticsError) return undefined;
     if (!hasEnoughBalance) return undefined;
-    
-    if (isPermitSupported) {
-      // EIP-2612 Permit path: always use payOrderWithPermit regardless of allowance.
-      // The permit + transferFrom happen atomically inside the contract — no prior approve needed.
-      return payOrderWithPermit();
-    } else {
-      // Fallback: classic approve → payOrder (restricted to exact amount, never unlimited)
-      return needsApproval ? approveMusd() : payOrder();
-    }
+
+    // EIP-712 Permit path — always preferred. One off-chain signature + one on-chain tx.
+    // No approve() is ever called; authorization is handled atomically inside payOrderWithPermit.
+    if (isPermitSupported) return payOrderWithPermit();
+
+    // Fallback: MUSD token does not support EIP-2612 permit.
+    // payOrder() requires the user to have a prior allowance (e.g. set manually).
+    // We intentionally do NOT call approve() automatically — the user must grant
+    // allowance separately to avoid triggering a "Spending cap request" popup.
+    return payOrder();
   };
 
   const primaryLabel = !writeConnectorReady
@@ -1080,17 +1043,19 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         ? 'Token diagnostics failed'
         : !hasEnoughBalance
         ? 'Insufficient MUSD balance'
-        : step === 'approving' && !hasEnoughAllowance
-        ? 'Approving...'
+        : step === 'signing'
+        ? 'Signing Permit...'
         : step === 'paying'
-        ? isPermitSupported ? 'Signing & Paying...' : 'Paying...'
+        ? 'Submitting Payment...'
         : isPermitSupported
         ? '⚡ Sign & Pay with MUSD'
-        : 'Pay MUSD';
+        : hasEnoughAllowance
+        ? 'Pay MUSD'
+        : 'Insufficient Allowance';
 
   const disablePrimary =
     loadingBalances ||
-    (step === 'approving' && !hasEnoughAllowance) ||
+    step === 'signing' ||
     step === 'paying' ||
     isPaymentConfirming ||
     step === 'submitted' ||
@@ -1219,7 +1184,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
                   disabled={disablePrimary}
                   onClick={primaryAction}
                 >
-                  {loadingBalances || step === 'approving' || step === 'paying' || isPaymentConfirming ? (
+                  {loadingBalances || step === 'signing' || step === 'paying' || isPaymentConfirming ? (
                     <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
                     <Wallet className="mr-2 h-4 w-4" />
@@ -1243,21 +1208,14 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
           )}
         </div>
 
-        {approvalTxHash ? (
-          <div className="rounded-3xl bg-white p-5 shadow-sm">
-            <p className="text-sm font-black text-slate-950">Approval Transaction</p>
-            <p className="mt-2 break-all rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-600">{approvalTxHash}</p>
-            {isApprovalConfirming && !hasEnoughAllowance ? <StatusBox tone="warn" text="Waiting for allowance confirmation..." /> : null}
-            {hasEnoughAllowance ? <StatusBox tone="success" text="MUSD approval ready" /> : null}
-          </div>
-        ) : null}
-
         {paymentTxHash ? (
           <div className="rounded-3xl bg-white p-5 shadow-sm">
             <p className="text-sm font-black text-slate-950">Payment Transaction</p>
             <p className="mt-2 break-all rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-600">{paymentTxHash}</p>
+            {step === 'signing' ? <StatusBox tone="warn" text="Step 1/2 — Signing EIP-712 permit (free, no gas)..." /> : null}
+            {step === 'paying' ? <StatusBox tone="warn" text="Step 2/2 — Submitting payment transaction..." /> : null}
             {step === 'submitted' || isPaymentConfirming ? <StatusBox tone="warn" text="Waiting for blockchain confirmation" /> : null}
-            {step === 'confirmed' ? <StatusBox tone="success" text="Payment Submitted" /> : null}
+            {step === 'confirmed' ? <StatusBox tone="success" text="Payment Confirmed ✔" /> : null}
             {step === 'submitted' || step === 'confirmed' || isPaymentConfirming ? (
               <p className="mt-3 text-xs font-bold text-slate-500">
                 The POS will be confirmed automatically by the Goldsky webhook after the OrderPaid event is indexed.

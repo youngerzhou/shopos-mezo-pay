@@ -23,10 +23,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   try {
     const receipt = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
+
     if (receipt.status !== 'success') {
-      return NextResponse.json({ error: 'Payment failed' }, { status: 400 });
+      // Transaction reverted on-chain. Try to extract the revert reason for debugging.
+      const revertReason = receipt.logs?.length === 0
+        ? 'Transaction reverted (no logs emitted)'
+        : `Transaction reverted (status=${receipt.status})`;
+      console.error('[submit-tx] On-chain revert detected:', {
+        txHash,
+        paymentIntentId: id,
+        revertReason,
+        blockNumber: receipt.blockNumber?.toString(),
+        gasUsed: receipt.gasUsed?.toString()
+      });
+      return NextResponse.json({ error: revertReason, status: 'failed' }, { status: 400 });
     }
 
+    // Transaction succeeded on-chain. Now attempt backend indexing.
     const result = await processMusdOrderPaidWebhook(
       receipt.logs.map((log) => ({
         ...log,
@@ -37,15 +50,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const confirmedIntent = result.confirmed.find((item: any) => item.id === id) || result.confirmed[0] || null;
 
     if (!confirmedIntent) {
+      // Re-check DB — Goldsky webhook may have already confirmed it
       const latestIntent = await getPaymentIntent(id);
       if (latestIntent?.status === 'confirmed') {
         return NextResponse.json({ status: latestIntent.status, paymentIntent: latestIntent, txHash });
       }
+      // Indexing failed but tx is confirmed on-chain. Return 202 so the frontend
+      // treats this as 'pending' and lets Goldsky webhook handle final confirmation.
+      // Do NOT return 400 here — the money has already moved.
+      console.warn('[submit-tx] Backend indexing failed but tx confirmed on-chain:', {
+        txHash,
+        paymentIntentId: id,
+        webhookErrors: result.errors
+      });
       return NextResponse.json({
-        error: result.errors[0] || 'Payment failed',
-        handled: result.handled,
-        errors: result.errors
-      }, { status: 400 });
+        status: 'pending',
+        message: 'Transaction confirmed on-chain. Awaiting Goldsky webhook indexing.',
+        txHash,
+        webhookErrors: result.errors
+      }, { status: 202 });
     }
 
     return NextResponse.json({
@@ -55,11 +78,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     });
   } catch (error: any) {
     const message = error?.message || 'Waiting for blockchain confirmation';
-    const pending = /not found|could not find|transaction receipt/i.test(message);
+    const isPending = /not found|could not find|transaction receipt/i.test(message);
+    console.warn('[submit-tx] getTransactionReceipt error:', {
+      txHash,
+      paymentIntentId: id,
+      isPending,
+      error: message
+    });
+    // RPC couldn't find the receipt yet — return 202 (pending), not 500
     return NextResponse.json({
-      status: pending ? 'pending' : 'failed',
-      error: pending ? 'Waiting for blockchain confirmation' : 'Payment failed',
+      status: 'pending',
+      message: isPending ? 'Waiting for blockchain confirmation' : 'RPC error — Goldsky webhook will confirm',
       details: message
-    }, { status: pending ? 202 : 500 });
+    }, { status: 202 });
   }
 }
