@@ -1063,8 +1063,11 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     if (!hasEnoughBalance) return undefined;
     
     if (isPermitSupported) {
-      return needsApproval ? payOrderWithPermit() : payOrder();
+      // EIP-2612 Permit path: always use payOrderWithPermit regardless of allowance.
+      // The permit + transferFrom happen atomically inside the contract — no prior approve needed.
+      return payOrderWithPermit();
     } else {
+      // Fallback: classic approve → payOrder (restricted to exact amount, never unlimited)
       return needsApproval ? approveMusd() : payOrder();
     }
   };
@@ -1080,7 +1083,9 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         : step === 'approving' && !hasEnoughAllowance
         ? 'Approving...'
         : step === 'paying'
-        ? 'Paying...'
+        ? isPermitSupported ? 'Signing & Paying...' : 'Paying...'
+        : isPermitSupported
+        ? '⚡ Sign & Pay with MUSD'
         : 'Pay MUSD';
 
   const disablePrimary =
@@ -1176,13 +1181,22 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
               
                {/* Payment Mode Indicator */}
               {!isWrongNetwork && isConnected && !tokenConfigInvalid && !tokenAddressConfigError && !hasDiagnosticsError && (
-                <div className="mb-2 rounded-2xl bg-blue-50 p-3 text-sm font-bold text-blue-700">
-                  <p>QR Contract Payment - Mode 2</p>
-                  <p className="text-xs font-normal text-blue-600">
-                    {isPermitSupported
-                      ? '⚡ One-click Permit payment enabled. Sign EIP-712 permit off-chain and pay in one step.'
-                      : 'Customer signs transaction. ShopOSPayment contract emits OrderPaid event for Goldsky indexing.'}
-                  </p>
+                <div className={`mb-2 rounded-2xl p-3 text-sm font-bold ${isPermitSupported ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'}`}>
+                  {isPermitSupported ? (
+                    <>
+                      <p className="font-black">⚡ One-Click Payment</p>
+                      <p className="mt-0.5 text-xs font-normal text-emerald-600">
+                        EIP-712 off-chain signature → on-chain payment. Single wallet confirmation. No separate approval step.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-black">Standard Approval Flow</p>
+                      <p className="mt-0.5 text-xs font-normal text-blue-600">
+                        {needsApproval ? 'Step 1: Approve exact MUSD amount, then confirm payment.' : 'MUSD approved. Ready to pay.'}
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
 

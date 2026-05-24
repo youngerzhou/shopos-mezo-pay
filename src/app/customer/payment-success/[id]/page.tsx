@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Loader2, ReceiptText, TicketPercent, Wallet } from 'lucide-react';
+import { useAccount } from 'wagmi';
 import { Button } from '@/components/ui/button';
 
 type ReceiptItem = {
@@ -104,6 +105,7 @@ export default function CustomerPaymentSuccessPage() {
   const searchParams = useSearchParams();
   const paymentIntentId = params.id;
   const txHash = searchParams.get('txHash') || '';
+  const { address: connectedWallet } = useAccount();
   const [intent, setIntent] = useState<PaymentIntentReceipt | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -137,9 +139,15 @@ export default function CustomerPaymentSuccessPage() {
   const member = intent?.rawEvent?.member;
   const displayTxHash = txHash || intent?.txHash || '';
   const memberReferralId = member?.referralId || member?.referral_id || '';
-  const nextCouponHref = memberReferralId
-    ? `/customer/coupon-claim/next-purchase-reward?referral_id=${encodeURIComponent(memberReferralId)}`
-    : '/customer/coupon-claim/next-purchase-reward';
+  // Identify the customer: prefer referralId, fall back to payer wallet (from tx or connected wallet)
+  const payerWallet = intent?.payerWallet || connectedWallet || '';
+
+  const couponParams = new URLSearchParams();
+  if (memberReferralId) couponParams.set('referral_id', memberReferralId);
+  else if (payerWallet) couponParams.set('wallet', payerWallet);
+  const couponQuery = couponParams.toString();
+
+  const nextCouponHref = `/customer/coupon-claim/next-purchase-reward${couponQuery ? `?${couponQuery}` : ''}`;
   const backToStoreHref = memberReferralId
     ? `/customer/shop?referral_id=${encodeURIComponent(memberReferralId)}`
     : '/customer/shop';
