@@ -509,6 +509,14 @@ export default function ShoposHome() {
 
         const posData = await posRes.json();
         if (posData.membership) setMembership(posData.membership);
+        setPosOrder(prevOrder => {
+          if (!prevOrder) return null;
+          return {
+            ...prevOrder,
+            payment_status: 'paid',
+            payment_tx_hash: txHash
+          };
+        });
       }
 
       setIsPaid(true);

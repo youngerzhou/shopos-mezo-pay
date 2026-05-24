@@ -85,6 +85,15 @@ function mirrorIntent(intent: PaymentIntent) {
 }
 
 function rowToPaymentIntent(row: any): PaymentIntent {
+  let rawEvent = row.raw_event;
+  if (typeof rawEvent === 'string') {
+    try {
+      rawEvent = JSON.parse(rawEvent);
+    } catch {
+      rawEvent = undefined;
+    }
+  }
+
   const intent: PaymentIntent = {
     id: row.id,
     orderId: row.order_id,
@@ -100,7 +109,7 @@ function rowToPaymentIntent(row: any): PaymentIntent {
     payerWallet: row.payer_wallet || undefined,
     txHash: row.tx_hash || undefined,
     blockNumber: row.block_number || undefined,
-    rawEvent: row.raw_event || undefined,
+    rawEvent: rawEvent || undefined,
     confirmedAt: row.confirmed_at ? (row.confirmed_at instanceof Date ? row.confirmed_at.toISOString() : new Date(row.confirmed_at).toISOString()) : undefined
   };
   mirrorIntent(intent);
