@@ -434,7 +434,6 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     setTokenConfigInvalid(false);
     setRawBalance(null);
     setBalance(null);
-    setNeedsApproval(false);
     setTokenDiagnostics(baseDiagnostics);
 
     if (tokenAddressConfigError) {
@@ -641,7 +640,6 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
 
       const enoughBalance = rawBalanceResult >= amountUnits;
       const enoughAllowance = rawAllowanceResult >= amountUnits;
-      // needsApproval is diagnostic only — permit path never uses approve()
       setPartialDiagnostics({
         hasEnoughBalance: enoughBalance ? 'yes' : 'no',
         hasEnoughAllowance: enoughAllowance ? 'yes' : 'no',
@@ -840,9 +838,8 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     return false;
   };
 
-  // approveMusd() intentionally removed.
-  // The EIP-712 permit path (payOrderWithPermit) handles authorization inline
-  // inside the contract call — no on-chain approve() step is ever needed.
+
+
 
   const payOrder = async () => {
     setError('');
@@ -1156,9 +1153,9 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
                     </>
                   ) : (
                     <>
-                      <p className="font-black">Standard Approval Flow</p>
+                      <p className="font-black">Standard Payment Flow</p>
                       <p className="mt-0.5 text-xs font-normal text-blue-600">
-                        {needsApproval ? 'Step 1: Approve exact MUSD amount, then confirm payment.' : 'MUSD approved. Ready to pay.'}
+                        Direct payment — requires prior MUSD allowance set on the contract.
                       </p>
                     </>
                   )}
