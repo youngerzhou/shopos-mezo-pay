@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { decodeEventLog, formatUnits, parseAbiItem } from 'viem';
+import { decodeEventLog, formatUnits, hexToString, parseAbiItem } from 'viem';
 import { publicClient } from '@/app/lib/mezo-config';
 import { MUSD_ADDRESSES } from '@/app/lib/mezo-config';
 import { getPaymentIntent, hasTxHash, markPaymentIntentConfirmed } from '@/app/lib/payment-intents-store';
@@ -8,6 +8,9 @@ import { processMusdOrderPaidWebhook } from '@/app/lib/musd-payment-webhook';
 export const dynamic = 'force-dynamic';
 
 const TRANSFER_EVENT = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)');
+const TRANSFER_SELECTOR = '0xa9059cbb';
+const TRANSFER_CALLDATA_HEX_LENGTH = 2 + 8 + 64 + 64;
+const PAYMENT_REF_PREFIX = 'SHOPOS_PAYMENT_REF:';
 
 function sameAddress(left?: string, right?: string) {
   return !!left && !!right && left.toLowerCase() === right.toLowerCase();
@@ -15,6 +18,24 @@ function sameAddress(left?: string, right?: string) {
 
 function musdAmount(value: bigint) {
   return Number(formatUnits(value, 18));
+}
+
+function parseDirectTransferPaymentRef(input?: string) {
+  if (!input || !input.toLowerCase().startsWith(TRANSFER_SELECTOR)) return null;
+  if (input.length <= TRANSFER_CALLDATA_HEX_LENGTH) return null;
+
+  try {
+    const refText = hexToString(`0x${input.slice(TRANSFER_CALLDATA_HEX_LENGTH)}` as `0x${string}`);
+    if (!refText.startsWith(PAYMENT_REF_PREFIX)) return null;
+    const [paymentRefPart, orderPart = ''] = refText.split(';ORDER:');
+    return {
+      paymentIntentId: paymentRefPart.slice(PAYMENT_REF_PREFIX.length).trim(),
+      orderId: orderPart.trim(),
+      raw: refText
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -35,6 +56,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   try {
     const receipt = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
+    const transaction = await publicClient.getTransaction({ hash: txHash as `0x${string}` });
 
     if (receipt.status !== 'success') {
       // Transaction reverted on-chain. Try to extract the revert reason for debugging.
@@ -77,8 +99,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           return false;
         }
       });
+      const paymentRef = parseDirectTransferPaymentRef(transaction.input);
 
       if (directTransferLog) {
+        if (!sameAddress(transaction.to || '', MUSD_ADDRESSES.testnet)) {
+          return NextResponse.json({ error: 'Direct transfer transaction target is not the configured MUSD token.' }, { status: 400 });
+        }
+        if (!paymentRef || paymentRef.paymentIntentId !== id || paymentRef.orderId !== intent.orderId) {
+          return NextResponse.json({
+            error: 'Direct transfer Payment Ref mismatch.',
+            expectedPaymentIntentId: id,
+            expectedOrderId: intent.orderId,
+            decodedPaymentRef: paymentRef
+          }, { status: 400 });
+        }
         if (await hasTxHash(txHash)) {
           return NextResponse.json({ error: `Duplicate txHash ${txHash}` }, { status: 409 });
         }
@@ -101,6 +135,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             to,
             amount: value.toString(),
             amountMUSD: musdAmount(value),
+            paymentRef: paymentRef.paymentIntentId,
+            orderRef: paymentRef.orderId,
+            paymentRefRaw: paymentRef.raw,
             transactionHash: txHash,
             blockNumber: Number(receipt.blockNumber)
           }

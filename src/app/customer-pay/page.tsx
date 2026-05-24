@@ -2,13 +2,14 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, CheckCircle2, Copy, RefreshCw, Wallet } from 'lucide-react';
-import { parseUnits, formatUnits } from 'viem';
+import { encodeFunctionData, parseUnits, formatUnits, stringToHex } from 'viem';
 import {
   useAccount,
   useConnect,
   usePublicClient,
   useSwitchChain,
   useWaitForTransactionReceipt,
+  useSendTransaction,
   useWriteContract,
   useSignTypedData
 } from 'wagmi';
@@ -334,6 +335,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   const { connectors, connectAsync, error: connectError } = useConnect();
   const { switchChain } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
+  const { sendTransactionAsync } = useSendTransaction();
   const { signTypedDataAsync } = useSignTypedData();
   const { setOpen: setConnectModalOpen } = useModal();
 
@@ -1216,6 +1218,13 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     }
 
     const amountWei = amountInUnits;
+    const paymentRefData = `SHOPOS_PAYMENT_REF:${paymentIntentId};ORDER:${orderId}`;
+    const transferCalldata = encodeFunctionData({
+      abi: erc20Abi,
+      functionName: 'transfer',
+      args: [merchant as `0x${string}`, amountWei]
+    });
+    const transferWithPaymentRef = `${transferCalldata}${stringToHex(paymentRefData).slice(2)}` as `0x${string}`;
     const directDiagnostics = {
       mode: 'Mode 3 - Direct Transfer',
       token: musdAddress,
@@ -1223,6 +1232,9 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
       to: merchant,
       amount: amountWei.toString(),
       amountMUSD: amount.toFixed(2),
+      paymentRef: paymentIntentId,
+      orderRef: orderId,
+      calldataPrefix: transferCalldata,
       chainId,
       paymentIntentId,
       orderId
@@ -1230,12 +1242,11 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
 
     try {
       setStep('paying');
-      console.log('[DirectTransfer] Submitting MUSD.transfer fallback:', directDiagnostics);
-      const hash = await writeContractAsync({
-        address: musdAddress as `0x${string}`,
-        abi: erc20Abi,
-        functionName: 'transfer',
-        args: [merchant as `0x${string}`, amountWei]
+      console.log('[DirectTransfer] Submitting MUSD.transfer fallback with Payment Ref calldata:', directDiagnostics);
+      const hash = await sendTransactionAsync({
+        to: musdAddress as `0x${string}`,
+        data: transferWithPaymentRef,
+        value: 0n
       });
 
       setPaymentTxHash(hash);
