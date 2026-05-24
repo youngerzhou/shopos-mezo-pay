@@ -50,8 +50,23 @@ export default function AdminMembersPage() {
   const [sending, setSending] = useState(false);
   const [sentCoupons, setSentCoupons] = useState<Record<string, string[]>>({});
 
+  const getUnusedCoupons = (m: Member | null): any[] => {
+    if (!m) return [];
+    const val = m.unused_coupons;
+    if (Array.isArray(val)) return val;
+    if (typeof val === 'string') {
+      try {
+        const parsed = JSON.parse(val);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
   const currentCouponOwned = sendMember
-    ? sendMember.unused_coupons?.some(c => c.title === (campaigns.find(cp => cp.id === selectedCouponId)?.title))
+    ? getUnusedCoupons(sendMember).some(c => c.title === (campaigns.find(cp => cp.id === selectedCouponId)?.title))
     : false;
   const currentCouponSent = sendMember
     ? sentCoupons[sendMember.id]?.includes(selectedCouponId)
@@ -217,9 +232,9 @@ export default function AdminMembersPage() {
 
               <div className="space-y-3">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Available Coupons</p>
-                {Array.isArray(selectedMember.unused_coupons) && selectedMember.unused_coupons.length > 0 ? (
+                {getUnusedCoupons(selectedMember).length > 0 ? (
                   <div className="space-y-2">
-                    {selectedMember.unused_coupons.map((coupon) => (
+                    {getUnusedCoupons(selectedMember).map((coupon) => (
                       <div key={coupon.id} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
                         <p className="font-black text-slate-950">{coupon.title}</p>
                         <p className="mt-1 text-xs font-bold text-slate-500">
@@ -264,7 +279,7 @@ export default function AdminMembersPage() {
                 {campaigns.map((campaign) => {
                   const isSelected = selectedCouponId === campaign.id;
                   const isAlreadySent = sendMember ? sentCoupons[sendMember.id]?.includes(campaign.id) : false;
-                  const isAlreadyOwned = sendMember ? sendMember.unused_coupons?.some(c => c.title === campaign.title) : false;
+                  const isAlreadyOwned = sendMember ? getUnusedCoupons(sendMember).some(c => c.title === campaign.title) : false;
                   return (
                     <button 
                       key={campaign.id} 

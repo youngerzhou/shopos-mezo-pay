@@ -67,7 +67,22 @@ export async function GET(req: NextRequest) {
       LIMIT 100
     `;
 
-    return NextResponse.json({ members: rows });
+    const parsedRows = rows.map((row: any) => {
+      let unusedCoupons = row.unused_coupons;
+      if (typeof unusedCoupons === 'string') {
+        try {
+          unusedCoupons = JSON.parse(unusedCoupons);
+        } catch {
+          unusedCoupons = [];
+        }
+      }
+      return {
+        ...row,
+        unused_coupons: Array.isArray(unusedCoupons) ? unusedCoupons : []
+      };
+    });
+
+    return NextResponse.json({ members: parsedRows });
   } catch (error: any) {
     console.error('API GET /api/admin/members Error:', error);
     return NextResponse.json({ error: error.message || 'Unable to load members.' }, { status: 500 });
