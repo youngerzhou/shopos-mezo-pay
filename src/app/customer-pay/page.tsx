@@ -788,43 +788,70 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     }
 
     try {
-      // ── Step 1: Get current nonce fresh from chain ──────────────────────────
-      // We always fetch this at click-time, not from React state, to prevent
-      // stale-nonce failures if the user had prior permit transactions.
-      let currentNonce = nonce;
-      if (currentNonce === null && publicClient) {
-        try {
-          currentNonce = await publicClient.readContract({
-            address: musdAddress as `0x${string}`,
-            abi: erc20Abi,
-            functionName: 'nonces',
-            args: [address]
-          });
-          setNonce(currentNonce);
-        } catch (err) {
-          console.warn('[PayAndSign] nonces() read failed — permit may not be supported:', err);
-          setError('MUSD token does not support EIP-2612 Permit on this network. Cannot proceed without permit.');
-          setStep('failed');
-          return;
-        }
-      }
-      if (currentNonce === null) {
-        setError('Could not retrieve account nonce. Please refresh and try again.');
+      // Step 1: Fetch nonce ALWAYS fresh from chain
+      // Never rely on React state - a prior permit would have incremented it.
+      let currentNonce: bigint;
+      try {
+        currentNonce = await publicClient!.readContract({
+          address: musdAddress as `0x${string}`,
+          abi: erc20Abi,
+          functionName: 'nonces',
+          args: [address]
+        });
+        setNonce(currentNonce);
+        console.log('[PayAndSign] Fresh nonce from chain:', currentNonce.toString());
+      } catch (err) {
+        console.error('[PayAndSign] nonces() read failed:', err);
+        setError('MUSD token does not support EIP-2612 Permit on this network.');
         setStep('failed');
         return;
       }
 
-      // ── Step 2: EIP-712 Permit signature ────────────────────────────────────
-      // Wallet shows a "Signature request" — NOT "Spending cap request".
-      // This is free (no gas) and grants one-time, exact-amount authorization.
+      // Step 2: EIP-712 Permit signature
+      // Wallet shows a 'Signature request' - NOT 'Spending cap request'.
+      // CRITICAL: domain.name MUST exactly match the contract's stored value.
+      // On-chain verified via eip712Domain():
+      //   name='Mezo USD' (NOT 'MUSD' or 'MUSD Token'), version='1', chainId=31611
       setStep('signing_permit');
 
-      const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1-hour window
+      const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
+      // Always query eip712Domain() from chain - never trust tokenName React state
+      // which may still be the default 'MUSD Token' if loadTokenState() is in-flight.
+      let domainName = 'Mezo USD';   // on-chain verified fallback
+      let domainVersion = '1';       // on-chain verified fallback
+      try {
+        const eip712DomainAbi = [{
+          name: 'eip712Domain',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [],
+          outputs: [
+            { name: 'fields',            type: 'bytes1' },
+            { name: 'name',              type: 'string' },
+            { name: 'version',           type: 'string' },
+            { name: 'chainId',           type: 'uint256' },
+            { name: 'verifyingContract', type: 'address' },
+            { name: 'salt',              type: 'bytes32' },
+            { name: 'extensions',        type: 'uint256[]' }
+          ]
+        }] as const;
+        const [, onChainName, onChainVersion] = await publicClient!.readContract({
+          address: musdAddress as `0x${string}`,
+          abi: eip712DomainAbi,
+          functionName: 'eip712Domain'
+        });
+        domainName = onChainName;
+        domainVersion = onChainVersion;
+        console.log('[PayAndSign] eip712Domain() from chain:', { domainName, domainVersion });
+      } catch (err) {
+        console.warn('[PayAndSign] eip712Domain() not available, using hardcoded verified fallback:', { domainName, domainVersion });
+      }
 
       const permitDomain = {
-        name: tokenName || 'MUSD',
-        version: '1',
-        chainId: chainId ?? mezoTestnet.id,
+        name:              domainName,
+        version:           domainVersion,
+        chainId:           mezoTestnet.id,
         verifyingContract: musdAddress as `0x${string}`
       };
 
@@ -846,36 +873,62 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         deadline
       };
 
-      console.log('[PayAndSign] Requesting EIP-712 permit signature', {
-        domain: permitDomain,
-        message: { ...permitMessage, value: amountInUnits.toString(), nonce: currentNonce.toString() }
+      // Full debug dump BEFORE signing
+      console.log('[PayAndSign] EIP-712 domain (must match contract EXACTLY):', {
+        name:              permitDomain.name,
+        version:           permitDomain.version,
+        chainId:           permitDomain.chainId,
+        verifyingContract: permitDomain.verifyingContract
+      });
+      console.log('[PayAndSign] Permit message:', {
+        owner:    permitMessage.owner,
+        spender:  permitMessage.spender,
+        value:    amountInUnits.toString(),
+        nonce:    currentNonce.toString(),
+        deadline: deadline.toString()
+      });
+      console.log('[PayAndSign] Contract addresses:', {
+        musdToken:             musdAddress,
+        shopOSPaymentContract: paymentContract,
+        merchant,
+        paymentIntentIdBytes32,
+        orderIdBytes32
       });
 
       const signature = await signTypedDataAsync({
-        domain: permitDomain,
-        types: permitTypes,
+        domain:      permitDomain,
+        types:       permitTypes,
         primaryType: 'Permit',
-        message: permitMessage
+        message:     permitMessage
       });
 
-      console.log('[PayAndSign] Permit signature obtained:', signature);
 
-      // ── Step 3: Submit on-chain transaction ──────────────────────────────────
-      // Single contract call: permit() + transferFrom() executed atomically.
-      // Wallet shows "Transaction request" — a normal tx, NOT a spending cap.
-      setStep('paying');
-
+      // Full debug dump AFTER signing
       const r = signature.slice(0, 66) as `0x${string}`;
       const s = `0x${signature.slice(66, 130)}` as `0x${string}`;
       const v = parseInt(signature.slice(130, 132), 16);
 
-      console.log('[PayAndSign] Submitting payOrderWithPermit', {
+      console.log('[PayAndSign] Permit signature received:', {
+        signature,
+        r,
+        s,
+        v,
+        signatureLength: signature.length
+      });
+
+      // Step 3: Submit on-chain transaction
+      // Single contract call: permit() + transferFrom() executed atomically.
+      // Wallet shows 'Transaction request' - NOT a spending cap.
+      setStep('paying');
+
+      console.log('[PayAndSign] Submitting payOrderWithPermit tx:', {
+        contract:            paymentContract,
         paymentIntentIdBytes32,
         orderIdBytes32,
         merchant,
-        amount: amountInUnits.toString(),
-        deadline: deadline.toString(),
-        v
+        amount:              amountInUnits.toString(),
+        deadline:            deadline.toString(),
+        v, r, s
       });
 
       const hash = await writeContractAsync({
