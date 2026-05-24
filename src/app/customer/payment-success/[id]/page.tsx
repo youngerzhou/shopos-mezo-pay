@@ -51,6 +51,8 @@ type PaymentIntentReceipt = {
   };
 };
 
+type CouponClaimState = 'idle' | 'claiming' | 'claimed' | 'already_claimed' | 'error';
+
 const FALLBACK_PRODUCT_IMAGE = `data:image/svg+xml,${encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
   <rect width="96" height="96" rx="12" fill="#f1f5f9"/>
@@ -109,6 +111,8 @@ export default function CustomerPaymentSuccessPage() {
   const [intent, setIntent] = useState<PaymentIntentReceipt | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [couponState, setCouponState] = useState<CouponClaimState>('idle');
+  const [couponMessage, setCouponMessage] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -139,18 +143,52 @@ export default function CustomerPaymentSuccessPage() {
   const member = intent?.rawEvent?.member;
   const displayTxHash = txHash || intent?.txHash || '';
   const memberReferralId = member?.referralId || member?.referral_id || '';
-  // Identify the customer: prefer referralId, fall back to payer wallet (from tx or connected wallet)
+  // Auto-identify the customer: prefer stored referralId, fall back to payer wallet or connected wallet
   const payerWallet = intent?.payerWallet || connectedWallet || '';
 
-  const couponParams = new URLSearchParams();
-  if (memberReferralId) couponParams.set('referral_id', memberReferralId);
-  else if (payerWallet) couponParams.set('wallet', payerWallet);
-  const couponQuery = couponParams.toString();
-
-  const nextCouponHref = `/customer/coupon-claim/next-purchase-reward${couponQuery ? `?${couponQuery}` : ''}`;
   const backToStoreHref = memberReferralId
     ? `/customer/shop?referral_id=${encodeURIComponent(memberReferralId)}`
     : '/customer/shop';
+
+  const claimCoupon = async () => {
+    // Determine identity — never ask the user to input anything
+    const identity = memberReferralId
+      ? { referral_id: memberReferralId }
+      : payerWallet
+        ? { wallet: payerWallet }
+        : null;
+
+    if (!identity) {
+      setCouponState('error');
+      setCouponMessage('Unable to identify your account. Please contact staff.');
+      return;
+    }
+
+    setCouponState('claiming');
+    setCouponMessage('');
+    try {
+      const res = await fetch('/api/customers/coupons/campaign/next-purchase-reward', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(identity)
+      });
+      const data = await res.json();
+
+      if (res.status === 409 || data?.alreadyClaimed) {
+        setCouponState('already_claimed');
+        setCouponMessage('Coupon already in your account!');
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(data?.error || 'Unable to claim coupon.');
+      }
+      setCouponState('claimed');
+      setCouponMessage('Reward coupon claimed successfully!');
+    } catch (err: any) {
+      setCouponState('error');
+      setCouponMessage(err.message || 'Unable to claim coupon.');
+    }
+  };
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-950">
@@ -236,21 +274,53 @@ export default function CustomerPaymentSuccessPage() {
               </div>
             </section>
 
+            {/* One-click coupon claim — no manual input ever needed */}
             <section className="rounded-lg border border-orange-200 bg-orange-50 p-3">
               <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-orange-700">
-                  <TicketPercent className="h-5 w-5" />
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white ${couponState === 'claimed' || couponState === 'already_claimed' ? 'text-emerald-600' : 'text-orange-700'}`}>
+                  {couponState === 'claimed' || couponState === 'already_claimed'
+                    ? <CheckCircle2 className="h-5 w-5" />
+                    : <TicketPercent className="h-5 w-5" />}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-black text-orange-950">Claim Your Next Coupon</p>
-                  <p className="mt-1 text-xs font-bold text-orange-800">Save 3.00 MUSD on your next order over 50.00 MUSD.</p>
+                  <p className="text-sm font-black text-orange-950">
+                    {couponState === 'claimed' ? 'Coupon Claimed!' : couponState === 'already_claimed' ? 'Coupon Already in Wallet' : 'Claim Your Next Coupon'}
+                  </p>
+                  <p className="mt-1 text-xs font-bold text-orange-800">
+                    Save 3.00 MUSD on your next order over 50.00 MUSD.
+                  </p>
                 </div>
               </div>
-              <Link href={nextCouponHref}>
-                <Button className="mt-3 h-11 w-full rounded-md bg-orange-600 font-black text-white hover:bg-orange-700">
-                  Claim Coupon
+
+              {/* Toast-style inline feedback */}
+              {couponMessage ? (
+                <div className={`mt-3 rounded-md px-3 py-2 text-sm font-black ${
+                  couponState === 'claimed' || couponState === 'already_claimed'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-red-100 text-red-700'
+                }`}>
+                  {(couponState === 'claimed' || couponState === 'already_claimed') && (
+                    <CheckCircle2 className="mr-1.5 inline h-4 w-4" />
+                  )}
+                  {couponMessage}
+                </div>
+              ) : null}
+
+              {/* Show claim button only while not yet successfully claimed */}
+              {couponState !== 'claimed' && couponState !== 'already_claimed' ? (
+                <Button
+                  id="claim-coupon-btn"
+                  className="mt-3 h-11 w-full rounded-md bg-orange-600 font-black text-white hover:bg-orange-700 disabled:opacity-60"
+                  onClick={claimCoupon}
+                  disabled={couponState === 'claiming'}
+                >
+                  {couponState === 'claiming' ? (
+                    <><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Claiming...</>
+                  ) : (
+                    <><TicketPercent className="mr-2 inline h-4 w-4" />Claim Coupon</>
+                  )}
                 </Button>
-              </Link>
+              ) : null}
             </section>
 
             <Link href={backToStoreHref}>
