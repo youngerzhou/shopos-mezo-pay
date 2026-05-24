@@ -1,9 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { decodeEventLog, formatUnits, parseAbiItem } from 'viem';
 import { publicClient } from '@/app/lib/mezo-config';
-import { getPaymentIntent } from '@/app/lib/payment-intents-store';
+import { MUSD_ADDRESSES } from '@/app/lib/mezo-config';
+import { getPaymentIntent, hasTxHash, markPaymentIntentConfirmed } from '@/app/lib/payment-intents-store';
 import { processMusdOrderPaidWebhook } from '@/app/lib/musd-payment-webhook';
 
 export const dynamic = 'force-dynamic';
+
+const TRANSFER_EVENT = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)');
+
+function sameAddress(left?: string, right?: string) {
+  return !!left && !!right && left.toLowerCase() === right.toLowerCase();
+}
+
+function musdAmount(value: bigint) {
+  return Number(formatUnits(value, 18));
+}
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -50,6 +62,58 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const confirmedIntent = result.confirmed.find((item: any) => item.id === id) || result.confirmed[0] || null;
 
     if (!confirmedIntent) {
+      const directTransferLog = receipt.logs.find((log) => {
+        if (!sameAddress(log.address, MUSD_ADDRESSES.testnet)) return false;
+        try {
+          const decoded = decodeEventLog({
+            abi: [TRANSFER_EVENT],
+            data: log.data,
+            topics: log.topics
+          });
+          if (decoded.eventName !== 'Transfer') return false;
+          const { to, value } = decoded.args;
+          return sameAddress(to, intent.merchantWallet) && musdAmount(value) >= intent.amountMUSD;
+        } catch {
+          return false;
+        }
+      });
+
+      if (directTransferLog) {
+        if (await hasTxHash(txHash)) {
+          return NextResponse.json({ error: `Duplicate txHash ${txHash}` }, { status: 409 });
+        }
+
+        const decoded = decodeEventLog({
+          abi: [TRANSFER_EVENT],
+          data: directTransferLog.data,
+          topics: directTransferLog.topics
+        });
+        const { from, to, value } = decoded.args;
+        const directIntent = await markPaymentIntentConfirmed(intent, {
+          txHash,
+          payerWallet: from,
+          blockNumber: Number(receipt.blockNumber),
+          rawEvent: {
+            eventName: 'Transfer',
+            paymentMode: 'direct_transfer',
+            token: MUSD_ADDRESSES.testnet,
+            from,
+            to,
+            amount: value.toString(),
+            amountMUSD: musdAmount(value),
+            transactionHash: txHash,
+            blockNumber: Number(receipt.blockNumber)
+          }
+        });
+
+        return NextResponse.json({
+          status: directIntent.status,
+          paymentIntent: directIntent,
+          txHash,
+          paymentMode: 'direct_transfer'
+        });
+      }
+
       // Re-check DB — Goldsky webhook may have already confirmed it
       const latestIntent = await getPaymentIntent(id);
       if (latestIntent?.status === 'confirmed') {

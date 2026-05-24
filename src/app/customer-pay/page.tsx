@@ -55,6 +55,16 @@ const erc20Abi = [
     outputs: [{ name: '', type: 'uint256' }]
   },
   {
+    name: 'transfer',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' }
+    ],
+    outputs: [{ name: '', type: 'bool' }]
+  },
+  {
     name: 'approve',
     type: 'function',
     stateMutability: 'nonpayable',
@@ -121,6 +131,7 @@ const shoposPaymentAbi = [
 // confirmed: tx mined, navigating to success
 // failed: unrecoverable error (user can retry from idle)
 type Step = 'idle' | 'signing_permit' | 'simulating' | 'paying' | 'confirming' | 'confirmed' | 'failed';
+type PaymentMode = 'permit' | 'direct_transfer';
 
 const PERMIT_VERSION = '1';
 
@@ -343,6 +354,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
   const [tokenConfigInvalid, setTokenConfigInvalid] = useState(false);
   const [step, setStep] = useState<Step>('idle');
   const [paymentTxHash, setPaymentTxHash] = useState<`0x${string}` | undefined>();
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('permit');
   const [error, setError] = useState('');
   const [loadingBalances, setLoadingBalances] = useState(false);
   const [nonce, setNonce] = useState<bigint | null>(null);
@@ -844,7 +856,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         const res = await fetch(`/api/payment-intents/${encodeURIComponent(paymentIntentId)}/submit-tx`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ txHash: paymentTxHash })
+          body: JSON.stringify({ txHash: paymentTxHash, paymentMode })
         });
         const data = await res.json();
 
@@ -879,7 +891,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     return () => {
       cancelled = true;
     };
-  }, [isPaymentConfirmed, orderId, paymentIntentId, paymentTxHash, router]);
+  }, [isPaymentConfirmed, orderId, paymentIntentId, paymentMode, paymentTxHash, router]);
 
   // ─── Payment action — EIP-712 Permit only, no approve() ever called ───────────
   //
@@ -1186,6 +1198,82 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     }
   };
 
+  const payDirectTransfer = async () => {
+    setError('');
+    setLastWriteError('');
+
+    if (!requireWriteConnector()) return;
+    if (missingEnv.length > 0) {
+      setError(`Missing environment configuration: ${missingEnv.join(', ')}.`);
+      return;
+    }
+    if (tokenConfigInvalid || tokenAddressConfigError) {
+      setError(tokenDiagnostics.exactErrorMessage || tokenAddressConfigError || 'Token configuration error.');
+      return;
+    }
+    if (!hasEnoughBalance) {
+      setError('Insufficient MUSD balance.');
+      return;
+    }
+    if (!address) {
+      setError('Wallet address unavailable.');
+      return;
+    }
+    if (!publicClient) {
+      setError('Public client is unavailable.');
+      setStep('failed');
+      return;
+    }
+
+    const amountWei = amountInUnits;
+    const directDiagnostics = {
+      mode: 'Mode 3 - Direct Transfer',
+      token: musdAddress,
+      from: address,
+      to: merchant,
+      amount: amountWei.toString(),
+      amountMUSD: amount.toFixed(2),
+      chainId,
+      paymentIntentId,
+      orderId
+    };
+
+    try {
+      setStep('simulating');
+      console.log('[DirectTransfer] Simulating MUSD.transfer fallback:', directDiagnostics);
+      await publicClient.simulateContract({
+        account: address as `0x${string}`,
+        address: musdAddress as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'transfer',
+        args: [merchant as `0x${string}`, amountWei]
+      });
+
+      setStep('paying');
+      console.log('[DirectTransfer] Submitting MUSD.transfer fallback:', directDiagnostics);
+      const hash = await writeContractAsync({
+        address: musdAddress as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'transfer',
+        args: [merchant as `0x${string}`, amountWei]
+      });
+
+      setPaymentTxHash(hash);
+      setStep('confirming');
+      console.log('[DirectTransfer] Transaction submitted:', { ...directDiagnostics, txHash: hash });
+    } catch (err: any) {
+      const isRejected = /rejected|denied|cancelled|user rejected/i.test(err?.message || '');
+      const message = isRejected ? 'Payment cancelled by user.' : (err?.shortMessage || err?.message || 'Direct transfer payment failed.');
+      console.error('[DirectTransfer] Fallback payment failed:', {
+        ...directDiagnostics,
+        ...serializeError(err)
+      });
+      setLastWriteError(message);
+      setError(message);
+      setStep(isRejected ? 'idle' : 'failed');
+    }
+  };
+
   const connectWallet = async (show?: () => void) => {
     setError('');
     console.log('[WalletConnectDebug] connect wallet clicked', {
@@ -1310,9 +1398,12 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
     if (isWrongNetwork) return switchToMezo();
     if (tokenConfigInvalid || tokenAddressConfigError || hasDiagnosticsError) return;
     if (!hasEnoughBalance) return;
-    // Always use EIP-712 permit path — no approve(), no fallback
-    return payAndSign();
+    return paymentMode === 'direct_transfer' ? payDirectTransfer() : payAndSign();
   };
+
+  const modeLabel = paymentMode === 'direct_transfer'
+    ? 'Mode 3 Direct Transfer'
+    : 'Mode 2 EIP-712 Permit';
 
   const primaryLabel = !writeConnectorReady
     ? '🔌 Connect Wallet'
@@ -1334,7 +1425,9 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
                   ? '✅ Payment Confirmed'
                   : step === 'failed'
                     ? '⚡ Retry Payment'
-                    : `⚡ Sign & Pay ${formatMUSD(amount || 0)}`;
+                    : paymentMode === 'direct_transfer'
+                      ? `Transfer & Pay ${formatMUSD(amount || 0)}`
+                      : `⚡ Sign & Pay ${formatMUSD(amount || 0)}`;
 
   const disablePrimary =
     loadingBalances ||
@@ -1400,10 +1493,31 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
               
                {/* Payment Mode Indicator — always EIP-712 one-click */}
               {!isWrongNetwork && isConnected && !tokenConfigInvalid && !tokenAddressConfigError && !hasDiagnosticsError && (
-                <div className="mb-2 rounded-2xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">
-                  <p className="font-black">⚡ One-Click EIP-712 Payment</p>
-                  <p className="mt-0.5 text-xs font-normal text-emerald-600">
-                    Sign a free off-chain permit → automatic on-chain payment. No separate "Spending cap" approval.
+                <div className={`mb-2 rounded-2xl p-3 text-sm font-bold ${paymentMode === 'direct_transfer' ? 'bg-sky-50 text-sky-800' : 'bg-emerald-50 text-emerald-700'}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-black">{paymentMode === 'direct_transfer' ? 'Mode 3 — Direct Transfer' : 'Mode 2 — EIP-712 Permit'}</p>
+                      <p className={`mt-0.5 text-xs font-normal ${paymentMode === 'direct_transfer' ? 'text-sky-700' : 'text-emerald-600'}`}>
+                        {paymentMode === 'direct_transfer'
+                          ? 'Fallback mode sends MUSD directly to the merchant wallet. No spending-cap approval.'
+                          : 'Sign a free off-chain permit, then submit one payment transaction.'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-black ${paymentMode === 'direct_transfer' ? 'bg-white text-sky-800' : 'bg-white text-emerald-800'}`}
+                      onClick={() => {
+                        setPaymentMode((current) => current === 'permit' ? 'direct_transfer' : 'permit');
+                        setError('');
+                        setLastWriteError('');
+                        setStep('idle');
+                      }}
+                    >
+                      {paymentMode === 'direct_transfer' ? 'Use Permit' : 'Use Direct'}
+                    </button>
+                  </div>
+                  <p className="mt-2 text-[11px] font-black uppercase tracking-wide opacity-80">
+                    Current: {modeLabel}
                   </p>
                 </div>
               )}
@@ -1511,7 +1625,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
         <div className="rounded-3xl bg-white p-5 shadow-sm">
           <p className="text-sm font-black text-slate-950">Diagnostics</p>
           <div className="mt-3 space-y-2 rounded-2xl bg-slate-50 p-3 text-xs font-bold text-slate-600">
-            <DebugRow label="payment mode" value="QR Contract Payment (Mode 2)" />
+            <DebugRow label="payment mode" value={modeLabel} />
             <DebugRow label="NEXT_PUBLIC_MUSD_TOKEN_ADDRESS" value={tokenDiagnostics.envMusdTokenAddress || envMusdTokenAddress || '-'} />
             <DebugRow label="NEXT_PUBLIC_SHOPOS_MUSD_TOKEN" value={tokenDiagnostics.envShoposMusdToken || envShoposMusdToken || '-'} />
             <DebugRow label="NEXT_PUBLIC_MUSD_ADDRESS" value={tokenDiagnostics.envMusdAddress || envMusdAddress || '-'} />
@@ -1560,7 +1674,7 @@ export function CustomerPayContent({ paymentIntentIdFromPath = '' }: { paymentIn
             <DebugRow label="permit simulation error" value={tokenDiagnostics.permitSimulationError || '-'} />
             <DebugRow label="last failed step" value={tokenDiagnostics.lastFailedStep || '-'} />
             <DebugRow label="exact error message" value={tokenDiagnostics.exactErrorMessage || '-'} />
-            <DebugRow label="payment method" value="ShopOSPayment.payOrderWithPermit() — EIP-712 permit + transferFrom atomic" />
+            <DebugRow label="payment method" value={paymentMode === 'direct_transfer' ? 'MUSD.transfer(merchant, amount) — direct fallback' : 'ShopOSPayment.payOrderWithPermit() — EIP-712 permit + transferFrom atomic'} />
             <DebugRow label="Goldsky webhook" value="Indexes OrderPaid(paymentIntentId, orderId, merchant, payer, token, amount)" />
             <DebugRow label="order reconciliation" value="Deterministic via paymentIntentId/orderId in event" />
           </div>
