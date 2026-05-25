@@ -1,57 +1,166 @@
+
 # ShopOS Mezo
-
-**The “Alipay” of Web3 — Secure Bitcoin-backed Mobile Payments.**
-
-ShopOS Mezo delivers a **closed-loop retail payment stack** on the **Mezo Network**: shoppers scan a QR code, confirm in their wallet, and pay in **MUSD** (Bitcoin-backed stable value) while merchants get **real-time feedback** and **durable order records** off-chain—matching the speed and simplicity of a super-app, with Web3 guarantees.
-
+Mobile-first Web3 retail operating system powered by MUSD.
+ShopOS Mezo is a mobile-first retail POS system that combines Web3 payments with real merchant workflows including checkout, membership, coupons, Fast Pay, pickup orders, staff performance tracking, and reconciliation.
+## Demo
+- Live Demo: https://shopos-mezo-pay.vercel.app/
+- Presentation: https://gamma.app/docs/Mobile-first-Web3-Retail-Operating-System-v7g4ayhig82vulw
+- Demo Video: https://youtu.be/F-KTkoOTHO8
 ---
-
-## The complete technical loop
-
-1. **Surface (Vercel)** — The Next.js app is deployed on **Vercel** for low-latency delivery, env-based configuration, and CI-friendly previews—so POS and mobile flows stay responsive worldwide.
-2. **Wallet & chain (Mezo + Spectrum Nodes)** — Users connect via standard Web3 flows; transactions target **Mezo** with **Spectrum Nodes** providing reliable **RPC** access for reads, writes, and confirmation tracking.
-3. **Speed layer (Goldsky)** — **Goldsky** powers **real-time indexing and pipelines**, so confirmation and event-driven updates can approach **sub-second** perception—aligned with traditional retail checkout expectations.
-4. **Persistence (Neon)** — **Neon Postgres** (serverless) stores **orders, customers, staff context, and sync state**, keeping **on-chain events** and **merchant / inventory views** consistent without running a dedicated DB fleet.
-5. **Trust & incentives (Gitcoin Passport)** — **Gitcoin Passport** scores feed **Allowance Tiers** in the product UI: higher reputation can unlock **tiered allowances** and **up to ~10% bonus discounts**, reducing sybil-style abuse while rewarding proven humans.
-
-Together: **QR → wallet → MUSD on Mezo → indexed / confirmed fast → Neon order sync → merchant-ready state**.
-
+## What Problem Are We Solving?
+Most Web3 payment demos stop at:
+> Connect wallet → Pay
+Real merchants need much more:
+- POS checkout
+- QR-code payment
+- Membership & loyalty
+- Coupon redemption
+- Repeat customer payment flow
+- Staff performance tracking
+- Pickup order fulfillment
+- End-of-day reconciliation
+ShopOS Mezo bridges MUSD payments with real-world retail operations.
 ---
-
-## Core features
-
-### Scan-to-Pay closed loop
-
-A **seamless mobile experience**: **QR scanning** routes the user into checkout, then **instant Bitcoin-backed (MUSD) payments** settle via the **Mezo Network**—one continuous flow from scan to receipt-like certainty.
-
-### Real-time performance
-
-**Spectrum Nodes (RPC)** for dependable chain access, plus **Goldsky** for real-time data movement and indexing—aiming for **sub-second** perceived confirmation to **match traditional retail speed**.
-
-### Sybil resistance (Gitcoin Passport)
-
-Users with a stronger **Gitcoin Passport** footprint are eligible for **Allowance Tiers** (surfaced in the UI), mapping **on-chain reputation** to **bonus discounts** (up to **10%** in the tier model)—rewarding real participants over disposable identities.
-
-### Reliable infrastructure
-
-- **Vercel** — High-performance hosting, edge-friendly delivery, and environment-driven config for hackathon demos and production-shaped deploys.
-- **Neon Postgres** — **Serverless** relational storage for **order synchronization** between **on-chain lifecycle** and **merchant / operational** data—durable, scalable, and simple to wire from serverless API routes.
-
+## Key Features
+### Mobile-first POS checkout
+- Create retail orders
+- Generate QR payment codes
+- Mobile-first interface
+- Staff-linked sales tracking
+### MUSD Wallet Payments
+- QR-code payment flow
+- Wallet connection
+- MUSD checkout
+- Payment confirmation
+### Goldsky Real-time Payment Pipeline
+- Realtime blockchain event indexing
+- Merchant payment visibility
+- Faster payment confirmation
+### Membership & Coupons
+- Register with phone or email
+- Welcome incentives
+- Coupon issuance
+- Coupon redemption at checkout
+### Fast Pay
+Returning customers can authorize Fast Pay to reduce repeated wallet approval friction.
+### Self-Service Pickup Orders
+Customers can:
+1. Place order
+2. Pay with MUSD
+3. Receive pickup QR code
+Store staff can quickly fulfill pickup requests.
+### Staff Performance Tracking
+Each order is linked to staff performance metrics.
+Merchants can monitor:
+- Sales contribution
+- Staff performance
+- Operational activity
+### Daily Reconciliation
+Generate merchant operational reports:
+- Payment totals
+- Order status
+- Membership activity
+- Blockchain references
+- Staff sales performance
 ---
+## Closed-loop Retail Flow
+```text
+Merchant creates order
+        ↓
+Customer scans QR code
+        ↓
+MUSD payment
+        ↓
+Goldsky realtime indexing
+        ↓
+Payment confirmation
+        ↓
+Membership + coupon redemption
+        ↓
+Pickup QR generation
+        ↓
+Merchant reconciliation
 
-## Getting started
+Acquire → Pay → Reward → Reorder → Pickup → Reconcile
 
-```bash
+⸻
+
+Screenshots
+
+Add screenshots here:
+
+* POS checkout
+* QR payment
+* Membership page
+* Coupon flow
+* Pickup QR
+* Reconciliation dashboard
+
+⸻
+
+Tech Stack
+
+* Next.js
+* TypeScript
+* React
+* Neon Postgres
+* Vercel
+* Wagmi
+* Goldsky realtime indexing
+* Mezo Testnet
+* MUSD
+
+⸻
+
+Running Locally
+
+Clone repository:
+
+git clone https://github.com/youngerzhou/shopos-mezo-pay.git
+cd shopos-mezo-pay
+
+Install dependencies:
+
 npm install
+
+Start development server:
+
 npm run dev
-```
 
-Open [http://localhost:3000](http://localhost:3000). Application routes live under `src/app/`.
+Open:
 
-## Environment
+http://localhost:3000
 
-Set WalletConnect, RPC (e.g. Spectrum / Mezo test endpoints), database (Neon), and any indexer or Passport-related keys in `.env` or **Vercel** project settings. See `src/components/Web3Provider.tsx` and `src/app/lib/` for required variables.
+⸻
 
----
+Roadmap
 
-*ShopOS Mezo — closed-loop Web3 payments that feel like Alipay, backed by Bitcoin-derived MUSD on Mezo.*
+Phase 1 — Mainnet readiness
+
+* Refund flow
+* Exchange handling
+* Partial refund support
+* Production hardening
+
+Phase 2 — Merchant admin console
+
+* Coupon management
+* Staff dashboard
+* Role-based access control
+
+Phase 3 — Retail pilot
+
+* Apparel stores
+* Pop-up stores
+* Event retail
+
+⸻
+
+Founder
+
+Younger Zhou
+Founder / Product Lead / Full-Stack Developer
+
+X: https://x.com/youngerzhou
+LinkedIn: https://www.linkedin.com/in/youngerzhou/
+re
